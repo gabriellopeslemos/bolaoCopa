@@ -1,6 +1,6 @@
 # Guia de Configuração — Bolão Copa (via Console)
 
-Passo a passo para colocar o backend (Firebase + API-Football) no ar, focado no
+Passo a passo para colocar o backend (Firebase + TheSportsDB) no ar, focado no
 **Console** do Firebase/Google Cloud. Os poucos passos que exigem o terminal
 estão marcados com 🖥️ **(terminal)**.
 
@@ -13,12 +13,12 @@ estão marcados com 🖥️ **(terminal)**.
 ## Checklist rápido
 
 - [ ] 1. Criar o projeto Firebase
-- [ ] 2. Ativar Authentication (Email/senha + Google)
+- [ ] 2. Ativar Authentication (só Email/senha por enquanto)
 - [ ] 3. Criar o Firestore
 - [ ] 4. Registrar o App Web e copiar o `firebaseConfig`
 - [ ] 5. Ativar o plano Blaze
 - [ ] 6. Criar o alerta de orçamento de US$ 1
-- [ ] 7. Obter a chave da API-Football
+- [ ] 7. (Opcional) Chave premium do TheSportsDB
 - [ ] 8. Preencher o `app/.env.local`
 - [ ] 9. 🖥️ Conectar a CLI e fazer o deploy (rules + functions)
 - [ ] 10. Tornar-se admin (custom claim)
@@ -41,10 +41,15 @@ estão marcados com 🖥️ **(terminal)**.
 2. Aba **Sign-in method** → **Add new provider**.
 3. Ative **Email/Password**:
    - Ligue a primeira chave (*Email/Password*). Salvar.
-4. Ative **Google**:
-   - Selecione **Google** → ligue *Enable*.
-   - Defina um **nome público do app** e um **e-mail de suporte**.
-   - Salvar.
+
+> **Google login:** **não ative agora.** O app ainda não implementa login com
+> Google na interface (as funções existem em `app/lib/auth.ts`, mas nenhuma tela
+> as usa e não há pacote de OAuth instalado). Ative só **Email/senha**.
+>
+> Se ativar o Google, o Firebase mostra um aviso pedindo a **impressão digital
+> SHA-1**. **Ignore** — esse aviso só vale para apps **Android nativos**. Este
+> projeto usa o Firebase **JS SDK** dentro do Expo Go, então você registra um
+> **App Web** (passo 4), que não pede SHA-1.
 
 ## 3. Criar o Firestore
 
@@ -105,13 +110,22 @@ estão marcados com 🖥️ **(terminal)**.
    > **avisa**, não bloqueia — mas, no seu uso, chegar a US$ 0,50 já seria um sinal
    > para investigar.
 
-## 7. Obter a chave da API-Football
+## 7. (Opcional) Chave premium do TheSportsDB
 
-1. Crie conta em **https://www.api-football.com** (plano **Free** = 100 req/dia).
-   - Alternativamente via RapidAPI; o importante é obter a **API key**.
-2. No painel da conta, copie sua **API Key**. Guarde — vai no passo 9.
-   > O app sincroniza a Copa do Mundo (league `1`, season `2026`) a cada 30 min.
-   > 48 syncs/dia cabe folgado nas 100 req/dia.
+A sincronização usa o **TheSportsDB**. A **chave free pública `123` já vem
+configurada por padrão** — você não precisa criar conta nem cadastrar secret
+nenhum para começar.
+
+> O app sincroniza a Copa do Mundo (league `4429`, season `2026`) a cada 30 min,
+> combinando o calendário da temporada com os próximos jogos e os resultados mais
+> recentes.
+
+A única limitação da chave free é que o **calendário da temporada** retorna no
+máximo ~15 jogos por vez. Se quiser o calendário completo da Copa de uma só vez:
+
+1. Assine o **Patreon** do TheSportsDB (**https://www.thesportsdb.com/api.php**)
+   para obter uma **chave premium**.
+2. Guarde a chave — você a define no passo 9 (param `SPORTSDB_API_KEY`).
 
 ## 8. Preencher o `app/.env.local`
 
@@ -134,8 +148,8 @@ estão marcados com 🖥️ **(terminal)**.
 
 ## 9. 🖥️ Conectar a CLI e fazer o deploy
 
-> Estes passos **não têm equivalente no Console** — a chave da API-Football (secret)
-> e o envio das regras/functions são feitos pela Firebase CLI.
+> Estes passos **não têm equivalente no Console** — o envio das regras/functions
+> é feito pela Firebase CLI.
 
 1. Instale a CLI (uma vez só):
    ```bash
@@ -150,10 +164,12 @@ estão marcados com 🖥️ **(terminal)**.
    firebase use --add
    # escolha o projeto e dê um alias, ex.: "default"
    ```
-4. Cadastre o secret da API-Football (cola a chave do passo 7 quando pedir):
+4. (Opcional) Só se você tem uma **chave premium** do TheSportsDB (passo 7),
+   defina o param antes do deploy criando `functions/.env`:
    ```bash
-   firebase functions:secrets:set FOOTBALL_API_KEY
+   echo "SPORTSDB_API_KEY=suachavepremium" > functions/.env
    ```
+   > Sem isso, a sincronização usa a chave free pública `123` automaticamente.
 5. Faça o deploy das regras, índices e functions:
    ```bash
    firebase deploy --only firestore:rules,firestore:indexes
@@ -196,7 +212,7 @@ npm start        # escaneie o QR code com o Expo Go no celular
 
 ## Testar sem a API de futebol
 
-Se quiser validar antes de configurar a API-Football, crie jogos manualmente no
+Se quiser validar sem depender da sincronização, crie jogos manualmente no
 **Firestore Console** → coleção `matches` → **Add document**:
 
 ```json
@@ -224,6 +240,6 @@ os palpites automaticamente.
 | Firestore criado | Console → Firestore Database mostra o banco |
 | Regras no ar | Console → Firestore → aba **Rules** (deve bater com `firestore.rules`) |
 | Functions no ar | Console → **Functions** lista `syncFixtures`, `onMatchWrite`, etc. |
-| Secret cadastrado | 🖥️ `firebase functions:secrets:access FOOTBALL_API_KEY` |
+| Sincronização | App → Perfil → Administração → **Sincronizar agora** (traz os jogos da Copa) |
 | Orçamento | console.cloud.google.com/billing → Budgets & alerts |
 | Admin | App → aba Perfil mostra a seção **Administração** |

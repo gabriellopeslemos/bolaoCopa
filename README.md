@@ -8,7 +8,7 @@ App de bolão da Copa do Mundo para Android e iOS, construído com **Expo (React
 - Fazer palpites nos placares com seletor +/− e preview de pontos ao vivo
 - Ranking por grupo com pódio (medalhas), avatares e estatísticas
 - Sistema de pontuação cumulativo (ver abaixo)
-- Sincronização automática de jogos via API-Football
+- Sincronização automática de jogos via TheSportsDB
 - Painel de admin para lançar resultados manualmente
 - Login persistente, tema escuro, tipografia Inter, ícones, gradientes e haptics
 
@@ -67,7 +67,7 @@ matches/{matchId}                    partidas (times, kickoff, status, score)
 
 - Node.js 18+
 - Conta no [Firebase](https://firebase.google.com) (gratuita)
-- Conta na [API-Football](https://www.api-football.com) (plano free = 100 req/dia)
+- (Opcional) Chave premium do [TheSportsDB](https://www.thesportsdb.com/api.php) — a chave free pública `123` já funciona para começar
 - [Firebase CLI](https://firebase.google.com/docs/cli): `npm install -g firebase-tools`
 - [Expo Go](https://expo.dev/go) no celular para testar sem build nativo
 
@@ -93,9 +93,12 @@ cp .env.example .env.local
 ```bash
 firebase login
 firebase use --add          # selecione seu projeto
-firebase functions:secrets:set FOOTBALL_API_KEY
-# Cole sua chave da API-Football quando solicitado
 ```
+
+> A sincronização usa o **TheSportsDB** com a chave free pública `123` por
+> padrão — não precisa configurar nada. Para o calendário completo sem limites,
+> defina o param `SPORTSDB_API_KEY` com uma chave premium (em `functions/.env`
+> ou via `firebase functions:config`).
 
 ### 4. Rodar os testes
 
@@ -190,7 +193,7 @@ npx eas build --platform ios --profile preview
 | Item | Custo esperado |
 |---|---|
 | Firebase (Auth / Firestore / Functions / Push) | **R$ 0** (dentro da camada grátis) |
-| API-Football (plano free, placar final) | **R$ 0** (100 req/dia) |
+| TheSportsDB (chave free pública `123`) | **R$ 0** |
 | Expo Go / APK direto | **R$ 0** |
 | Google Play (se quiser publicar) | US$ 25 (única vez) |
 | Apple App Store (se quiser publicar) | US$ 99/ano |

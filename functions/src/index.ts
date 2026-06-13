@@ -12,25 +12,27 @@ import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { defineSecret } from "firebase-functions/params";
+import { defineString } from "firebase-functions/params";
 import { logger } from "firebase-functions/v2";
 
-import { fetchFixtures, mapStatus } from "./footballApi";
+import { fetchWorldCupEvents } from "./sportsDb";
 import { scoreMatch } from "./scoreMatch";
 import type { MatchDoc } from "./types";
 
 initializeApp();
 
-const FOOTBALL_API_KEY = defineSecret("FOOTBALL_API_KEY");
+// Chave do TheSportsDB. A chave free pública "123" funciona (com limites);
+// defina SPORTSDB_API_KEY (.env / param) com uma premium p/ o calendário completo.
+const SPORTSDB_API_KEY = defineString("SPORTSDB_API_KEY", { default: "123" });
 
-// Copa do Mundo (FIFA World Cup) na API-Football.
-const WORLD_CUP_LEAGUE = 1;
-const SEASON = 2026;
+// Copa do Mundo (FIFA World Cup) no TheSportsDB.
+const WORLD_CUP_LEAGUE = 4429;
+const SEASON = "2026";
 const COMPETITION_ID = "world-cup-2026";
 
 /** Faz upsert dos jogos vindos da API no Firestore. */
 async function syncFromApi(apiKey: string): Promise<{ synced: number }> {
-  const fixtures = await fetchFixtures({
+  const fixtures = await fetchWorldCupEvents({
     apiKey,
     league: WORLD_CUP_LEAGUE,
     season: SEASON,
@@ -40,24 +42,18 @@ async function syncFromApi(apiKey: string): Promise<{ synced: number }> {
   let synced = 0;
 
   for (const f of fixtures) {
-    const status = mapStatus(f.fixture.status.short);
-    const hasScore = f.goals.home !== null && f.goals.away !== null;
-    const docId = `${COMPETITION_ID}-${f.fixture.id}`;
+    const docId = `${COMPETITION_ID}-${f.externalId}`;
 
     const data: Partial<MatchDoc> = {
       competitionId: COMPETITION_ID,
-      externalId: f.fixture.id,
-      round: f.league.round,
-      home: { name: f.teams.home.name, flag: f.teams.home.logo },
-      away: { name: f.teams.away.name, flag: f.teams.away.logo },
-      kickoff: Timestamp.fromDate(new Date(f.fixture.date)),
-      status,
-      score:
-        status === "finished" && hasScore
-          ? { home: f.goals.home as number, away: f.goals.away as number }
-          : status === "live" && hasScore
-            ? { home: f.goals.home as number, away: f.goals.away as number }
-            : null,
+      externalId: f.externalId,
+      round: f.round,
+      home: { name: f.home.name, flag: f.home.flag },
+      away: { name: f.away.name, flag: f.away.flag },
+      kickoff: Timestamp.fromDate(f.kickoff),
+      status: f.status,
+      // Mantém o placar quando o jogo está ao vivo ou encerrado; null se agendado.
+      score: f.status === "scheduled" ? null : f.score,
       updatedAt: Timestamp.now(),
     };
 
@@ -71,20 +67,17 @@ async function syncFromApi(apiKey: string): Promise<{ synced: number }> {
 
 /** Sincronização agendada (a cada 30 min). */
 export const syncFixtures = onSchedule(
-  { schedule: "every 30 minutes", secrets: [FOOTBALL_API_KEY], region: "us-central1" },
+  { schedule: "every 30 minutes", region: "us-central1" },
   async () => {
-    await syncFromApi(FOOTBALL_API_KEY.value());
+    await syncFromApi(SPORTSDB_API_KEY.value());
   }
 );
 
 /** Sincronização sob demanda (apenas admin). */
-export const syncFixturesNow = onCall(
-  { secrets: [FOOTBALL_API_KEY] },
-  async (req) => {
-    await assertAdmin(req.auth?.uid);
-    return syncFromApi(FOOTBALL_API_KEY.value());
-  }
-);
+export const syncFixturesNow = onCall(async (req) => {
+  await assertAdmin(req.auth?.uid);
+  return syncFromApi(SPORTSDB_API_KEY.value());
+});
 
 /** Lança/ajusta o placar de um jogo manualmente (fallback sem API). */
 export const setMatchResult = onCall(async (req) => {

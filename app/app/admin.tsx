@@ -53,7 +53,7 @@ export default function AdminScreen() {
         <Card style={styles.card}>
           <Text variant="heading">Sincronizar jogos</Text>
           <Text variant="body" color={palette.textMuted}>
-            Busca jogos e placares da Copa na API-Football e atualiza o banco.
+            Busca jogos e placares da Copa no TheSportsDB e atualiza o banco.
           </Text>
           <Button title="Sincronizar agora" icon="sync" onPress={sync} loading={syncing} />
         </Card>
