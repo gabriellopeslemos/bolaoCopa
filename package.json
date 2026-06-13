@@ -1,0 +1,15 @@
+{
+  "name": "bolao-copa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bolão da Copa do Mundo - app de palpites entre amigos (Android + iOS)",
+  "workspaces": [
+    "packages/*",
+    "functions"
+  ],
+  "scripts": {
+    "test": "npm test --workspace @bolao/scoring",
+    "build:scoring": "npm run build --workspace @bolao/scoring"
+  },
+  "license": "MIT"
+}

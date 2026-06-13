@@ -1,0 +1,93 @@
+rules_version = '2';
+
+// Regras de segurança do Bolão da Copa.
+//
+// Princípios:
+//  - Cada usuário só edita o próprio perfil e os próprios palpites.
+//  - Palpites só podem ser criados/editados ANTES do início do jogo.
+//  - Os campos de pontos (points/totalPoints) NUNCA são graváveis pelo cliente:
+//    são calculados exclusivamente pelas Cloud Functions (Admin SDK ignora estas regras).
+//  - Matches/competitions são somente leitura para clientes (escrita via Admin SDK).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isUser(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isMember(groupId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid));
+    }
+
+    function isOwner(groupId) {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/groups/$(groupId)).data.ownerId == request.auth.uid;
+    }
+
+    // Perfis
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow create, update: if isUser(uid);
+      allow delete: if false;
+    }
+
+    // Grupos
+    match /groups/{groupId} {
+      allow read: if isMember(groupId);
+      // Qualquer usuário autenticado pode criar um grupo (sendo o dono).
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid;
+      allow update: if isOwner(groupId);
+      allow delete: if isOwner(groupId);
+
+      // Membros do grupo
+      match /members/{uid} {
+        allow read: if isMember(groupId);
+        // Entrar no grupo: cria o próprio doc de membro (entrada por convite é
+        // validada na Cloud Function de "join", mas permitimos self-create aqui).
+        allow create: if isUser(uid)
+          && request.resource.data.totalPoints == 0;
+        // O dono pode remover membros; o membro pode sair (apagar o próprio doc).
+        allow delete: if isOwner(groupId) || isUser(uid);
+        // Pontos só são atualizados pelas Cloud Functions (Admin SDK).
+        allow update: if false;
+      }
+
+      // Palpites do grupo
+      match /bets/{betId} {
+        allow read: if isMember(groupId);
+
+        // Criar/editar palpite: precisa ser do próprio usuário, o jogo precisa
+        // ainda não ter começado e o campo de pontos deve vir zerado.
+        allow create, update: if isMember(groupId)
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.points == 0
+          && matchIsOpen(request.resource.data.matchId);
+
+        allow delete: if false;
+      }
+    }
+
+    function matchIsOpen(matchId) {
+      return exists(/databases/$(database)/documents/matches/$(matchId)) &&
+        get(/databases/$(database)/documents/matches/$(matchId)).data.kickoff
+          > request.time &&
+        get(/databases/$(database)/documents/matches/$(matchId)).data.status == 'scheduled';
+    }
+
+    // Competições e partidas: leitura pública para autenticados, escrita só via Admin SDK.
+    match /competitions/{compId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+    match /matches/{matchId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+  }
+}
