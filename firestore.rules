@@ -34,6 +34,13 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create, update: if isUser(uid);
       allow delete: if false;
+
+      // Índice de participações do usuário (para listar seus grupos).
+      // O próprio usuário pode criar (ao criar um grupo); a entrada por convite
+      // é gravada pela Cloud Function joinGroup (Admin SDK).
+      match /memberships/{groupId} {
+        allow read, write: if isUser(uid);
+      }
     }
 
     // Grupos
@@ -42,6 +49,8 @@ service cloud.firestore {
       // Qualquer usuário autenticado pode criar um grupo (sendo o dono).
       allow create: if isSignedIn()
         && request.resource.data.ownerId == request.auth.uid;
+      // Dono edita configurações; qualquer membro pode entrar (incrementa
+      // memberCount via Cloud Function, então update direto fica só com o dono).
       allow update: if isOwner(groupId);
       allow delete: if isOwner(groupId);
 

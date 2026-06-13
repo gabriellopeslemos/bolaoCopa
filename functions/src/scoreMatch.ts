@@ -57,13 +57,20 @@ export async function scoreMatch(matchId: string): Promise<{ updated: number }> 
     const groupRef = betDoc.ref.parent.parent;
     if (!groupRef) continue;
     const groupId = groupRef.id;
-    const bet = betDoc.data() as { userId: string; score: Score; points?: number };
+    const bet = betDoc.data() as {
+      userId: string;
+      score: Score;
+      points?: number;
+      scoredAt?: unknown;
+    };
 
     const cfg = await configForGroup(groupId);
     const computed = calculatePoints(bet.score, result, cfg);
     const previous = bet.points ?? 0;
     const delta = computed.total - previous;
 
+    // Estatísticas (idempotentes): só contam na primeira pontuação do palpite.
+    const firstTime = bet.scoredAt == null;
     const memberRef = groupRef.collection("members").doc(bet.userId);
 
     await db.runTransaction(async (tx) => {
@@ -72,12 +79,12 @@ export async function scoreMatch(matchId: string): Promise<{ updated: number }> 
         breakdown: computed.breakdown,
         scoredAt: FieldValue.serverTimestamp(),
       });
-      if (delta !== 0) {
-        tx.set(
-          memberRef,
-          { totalPoints: FieldValue.increment(delta) },
-          { merge: true }
-        );
+      const memberUpdate: Record<string, unknown> = {};
+      if (delta !== 0) memberUpdate.totalPoints = FieldValue.increment(delta);
+      if (firstTime && computed.exact) memberUpdate.exactCount = FieldValue.increment(1);
+      if (firstTime && computed.correctOutcome) memberUpdate.correctCount = FieldValue.increment(1);
+      if (Object.keys(memberUpdate).length > 0) {
+        tx.set(memberRef, memberUpdate, { merge: true });
       }
     });
     updated++;

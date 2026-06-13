@@ -1,27 +1,30 @@
-/** Paleta de cores do tema escuro do Bolão Copa. */
+/**
+ * Alias de compatibilidade. Use `palette` / `theme` de "@/lib/theme".
+ */
+import { palette } from "./theme";
+
 export const colors = {
-  bg:          "#0D1B2A",
-  card:        "#112236",
-  cardBorder:  "#1E3A5F",
-  text:        "#FFFFFF",
-  textMuted:   "#8BA3BB",
-  primary:     "#2979FF",
-  green:       "#4CAF50",
-  teal:        "#26C6DA",
-  purple:      "#9C27B0",
-  orange:      "#FFA726",
-  red:         "#EF5350",
-  divider:     "#1E3A5F",
-  tabBar:      "#0A1520",
-  inputBg:     "#0A1520",
-  inputBorder: "#1E3A5F",
+  bg:          palette.bg,
+  card:        palette.surface,
+  cardBorder:  palette.border,
+  text:        palette.text,
+  textMuted:   palette.textMuted,
+  primary:     palette.primary,
+  green:       palette.green,
+  teal:        palette.cyan,
+  purple:      palette.purple,
+  orange:      palette.orange,
+  red:         palette.red,
+  divider:     palette.border,
+  tabBar:      palette.bgElevated,
+  inputBg:     palette.bgElevated,
+  inputBorder: palette.border,
 } as const;
 
-/** Cor do bônus por tipo. */
 export const bonusColor: Record<string, string> = {
-  exact:       colors.green,
-  winnerScore: colors.primary,
-  goalDiff:    colors.teal,
-  loserScore:  colors.purple,
-  rout:        colors.orange,
+  exact:       palette.green,
+  winnerScore: palette.blue,
+  goalDiff:    palette.cyan,
+  loserScore:  palette.purple,
+  rout:        palette.orange,
 };

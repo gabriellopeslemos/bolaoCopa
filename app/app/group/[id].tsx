@@ -1,272 +1,212 @@
-/**
- * Tela de detalhe do grupo com três abas:
- * Ranking | Jogos | Regras
- */
 import React, { useState } from "react";
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet,
-  Share, ActivityIndicator,
+  View, FlatList, StyleSheet, Pressable, Share, RefreshControl,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
-import {
-  collection, doc, getDocs, getDoc, query, orderBy,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { LinearGradient } from "expo-linear-gradient";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/hooks/useAuth";
-import { colors } from "@/lib/colors";
-import { PointsBadge } from "@/components/PointsBadge";
+import { useGroup, useMembers, useMatches, useMyBets } from "@/lib/data";
+import {
+  Screen, Text, Card, Avatar, EmptyState, SkeletonCard, FadeIn,
+} from "@/components/ui";
+import { MatchCard } from "@/components/MatchCard";
+import { ScoringRulesCard } from "@/components/ScoringRulesCard";
+import { palette, spacing, radius, gradients } from "@/lib/theme";
+import type { Member } from "@/lib/types";
 
 type Tab = "ranking" | "jogos" | "regras";
-
-interface Member { id: string; displayName: string; totalPoints: number; role: string }
-interface MatchItem {
-  id: string;
-  home: { name: string };
-  away: { name: string };
-  kickoff: { toDate(): Date };
-  status: "scheduled" | "live" | "finished";
-  score: { home: number; away: number } | null;
-  round?: string;
-}
-interface GroupData { id: string; name: string; inviteCode: string }
-interface BetItem { matchId: string; score: { home: number; away: number }; points: number; userId: string }
+const TABS: { key: Tab; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { key: "ranking", label: "Ranking", icon: "podium-outline" },
+  { key: "jogos", label: "Jogos", icon: "football-outline" },
+  { key: "regras", label: "Regras", icon: "book-outline" },
+];
 
 export default function GroupDetailScreen() {
   const { id: groupId } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>("ranking");
 
-  const { data: group, isLoading: gLoading } = useQuery({
-    queryKey: ["group", groupId],
-    queryFn: async () => {
-      const snap = await getDoc(doc(db, "groups", groupId!));
-      const data = snap.data() ?? {};
-      return { id: snap.id, ...(data as { name: string; inviteCode: string }) } as GroupData;
-    },
-    enabled: !!groupId,
-  });
-
-  const { data: members, isLoading: mLoading } = useQuery({
-    queryKey: ["members", groupId],
-    queryFn: async () => {
-      const snap = await getDocs(
-        query(collection(db, "groups", groupId!, "members"), orderBy("totalPoints", "desc"))
-      );
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Member));
-    },
-    enabled: !!groupId,
-  });
-
-  const { data: matches } = useQuery({
-    queryKey: ["matches"],
-    queryFn: async () => {
-      const snap = await getDocs(query(collection(db, "matches"), orderBy("kickoff", "asc")));
-      return snap.docs.map((d) => ({ id: d.id, ...d.data() } as MatchItem));
-    },
-  });
-
-  const { data: myBets } = useQuery({
-    queryKey: ["bets", groupId, user?.uid],
-    queryFn: async () => {
-      const snap = await getDocs(
-        query(
-          collection(db, "groups", groupId!, "bets"),
-          // In a real query you'd use where("userId","==",uid), but needs index
-        )
-      );
-      const bets: Record<string, BetItem> = {};
-      snap.docs
-        .filter((d) => (d.data() as BetItem).matchId !== undefined && d.data().userId === user?.uid)
-        .forEach((d) => {
-          bets[(d.data() as BetItem).matchId] = d.data() as BetItem;
-        });
-      return bets;
-    },
-    enabled: !!groupId && !!user,
-  });
+  const group = useGroup(groupId);
+  const members = useMembers(groupId);
+  const matches = useMatches();
+  const myBets = useMyBets(groupId, user?.uid);
 
   async function shareInvite() {
-    if (!group) return;
+    if (!group.data) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     await Share.share({
-      message: `Entre no meu grupo "${group.name}" no Bolão Copa! Código: ${group.inviteCode}`,
+      message: `Entre no meu bolão "${group.data.name}" no Bolão Copa!\nCódigo de convite: ${group.data.inviteCode}`,
     });
   }
 
-  if (gLoading || mLoading) {
-    return <View style={styles.center}><ActivityIndicator color={colors.primary} /></View>;
-  }
+  const loading = group.isLoading || members.isLoading;
 
   return (
-    <View style={styles.container}>
-      {/* Header do grupo */}
-      <View style={styles.header}>
-        <Text style={styles.groupName}>{group?.name}</Text>
-        <TouchableOpacity style={styles.inviteBtn} onPress={shareInvite}>
-          <Text style={styles.inviteText}>Convidar  {group?.inviteCode}</Text>
-        </TouchableOpacity>
-      </View>
+    <Screen>
+      {/* Header */}
+      <LinearGradient colors={gradients.header} style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
+        <View style={styles.headerTop}>
+          <Pressable onPress={() => router.back()} hitSlop={10} style={styles.headerBtn}>
+            <Ionicons name="chevron-back" size={24} color={palette.text} />
+          </Pressable>
+          <Pressable onPress={shareInvite} hitSlop={10} style={styles.inviteBtn}>
+            <Ionicons name="share-social-outline" size={16} color={palette.primary} />
+            <Text variant="label" color={palette.primary}>{group.data?.inviteCode ?? "..."}</Text>
+          </Pressable>
+        </View>
+        <Text variant="title" numberOfLines={1}>{group.data?.name ?? " "}</Text>
+        <Text variant="caption" color={palette.textMuted}>
+          {group.data?.memberCount ?? members.data?.length ?? 0} participantes
+        </Text>
 
-      {/* Abas */}
-      <View style={styles.tabs}>
-        {(["ranking", "jogos", "regras"] as Tab[]).map((t) => (
-          <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabActive]} onPress={() => setTab(t)}>
-            <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
-              {t.charAt(0).toUpperCase() + t.slice(1)}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* Conteúdo da aba */}
-      {tab === "ranking" && (
-        <FlatList
-          data={members ?? []}
-          keyExtractor={(m) => m.id}
-          contentContainerStyle={styles.list}
-          renderItem={({ item, index }) => (
-            <View style={[styles.memberCard, item.id === user?.uid && styles.myCard]}>
-              <Text style={styles.rank}>{index + 1}°</Text>
-              <Text style={styles.memberName} numberOfLines={1}>{item.displayName}</Text>
-              <Text style={styles.pts}>{item.totalPoints} pts</Text>
-            </View>
-          )}
-        />
-      )}
-
-      {tab === "jogos" && (
-        <FlatList
-          data={matches ?? []}
-          keyExtractor={(m) => m.id}
-          contentContainerStyle={styles.list}
-          renderItem={({ item }) => {
-            const myBet = myBets?.[item.id];
-            const canBet = item.status === "scheduled";
+        <View style={styles.segment}>
+          {TABS.map((t) => {
+            const active = tab === t.key;
             return (
-              <TouchableOpacity
-                style={styles.matchCard}
-                onPress={() => canBet
-                  ? router.push(`/group/bet/${item.id}?groupId=${groupId}`)
-                  : router.push(`/group/match/${item.id}?groupId=${groupId}`)
-                }
+              <Pressable
+                key={t.key}
+                style={[styles.segmentItem, active && styles.segmentActive]}
+                onPress={() => { Haptics.selectionAsync().catch(() => {}); setTab(t.key); }}
               >
-                <View style={styles.matchRow}>
-                  <Text style={styles.matchTeam} numberOfLines={1}>{item.home.name}</Text>
-                  {item.score
-                    ? <Text style={styles.matchScore}>{item.score.home}×{item.score.away}</Text>
-                    : <Text style={styles.matchVs}>vs</Text>}
-                  <Text style={[styles.matchTeam, { textAlign: "right" }]} numberOfLines={1}>
-                    {item.away.name}
-                  </Text>
-                </View>
-                <View style={styles.matchMeta}>
-                  {myBet ? (
-                    <Text style={styles.myBetText}>
-                      Palpite: {myBet.score.home}×{myBet.score.away}
-                      {myBet.points > 0 ? ` · ${myBet.points} pts` : ""}
-                    </Text>
-                  ) : canBet ? (
-                    <Text style={styles.betCta}>Fazer palpite →</Text>
-                  ) : (
-                    <Text style={styles.noBet}>Sem palpite</Text>
-                  )}
-                  <Text style={[
-                    styles.matchStatus,
-                    { color: item.status === "live" ? colors.green : colors.textMuted },
-                  ]}>
-                    {item.status === "live" ? "AO VIVO" : item.status === "finished" ? "Encerrado" : "Em breve"}
-                  </Text>
-                </View>
-              </TouchableOpacity>
+                <Ionicons name={t.icon} size={15} color={active ? palette.black : palette.textMuted} />
+                <Text variant="label" color={active ? palette.black : palette.textMuted}>{t.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </LinearGradient>
+
+      {/* Conteúdo */}
+      {loading ? (
+        <View style={styles.list}>{[0, 1, 2].map((i) => <SkeletonCard key={i} />)}</View>
+      ) : tab === "ranking" ? (
+        <RankingTab members={members.data ?? []} myUid={user?.uid}
+          refreshing={members.isRefetching} onRefresh={members.refetch} insetBottom={insets.bottom} />
+      ) : tab === "jogos" ? (
+        <FlatList
+          data={matches.data ?? []}
+          keyExtractor={(m) => m.id}
+          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + spacing.xl }]}
+          refreshControl={
+            <RefreshControl refreshing={matches.isRefetching} onRefresh={matches.refetch} tintColor={palette.primary} />
+          }
+          ListEmptyComponent={
+            <EmptyState icon="football-outline" title="Sem jogos ainda"
+              subtitle="Os jogos aparecem aqui assim que forem cadastrados." />
+          }
+          renderItem={({ item, index }) => {
+            const bet = myBets.data?.[item.id];
+            const open = item.status === "scheduled";
+            return (
+              <FadeIn delay={index * 40}>
+                <MatchCard
+                  match={item}
+                  bet={bet}
+                  onPress={() =>
+                    open
+                      ? router.push(`/group/bet/${item.id}?groupId=${groupId}`)
+                      : router.push(`/group/match/${item.id}?groupId=${groupId}`)
+                  }
+                />
+              </FadeIn>
             );
           }}
         />
+      ) : (
+        <View style={[styles.list, { paddingBottom: insets.bottom + spacing.xl }]}>
+          <ScoringRulesCard />
+          <Text variant="caption" color={palette.textFaint} style={{ paddingHorizontal: spacing.xs }}>
+            Os bônus são cumulativos e só contam se você acertar o vencedor (ou o empate).
+            Placar exato vale o máximo. Goleada = diferença de 4 gols ou mais.
+          </Text>
+        </View>
       )}
-
-      {tab === "regras" && <RulesTab />}
-    </View>
+    </Screen>
   );
 }
 
-function RulesTab() {
-  const rules = [
-    { label: "Acertar o vencedor (base)", pts: 3, color: colors.text },
-    { label: "Placar Exato", pts: 5, color: colors.green },
-    { label: "Placar Vencedor", pts: 3, color: colors.primary },
-    { label: "Diferença de Gols", pts: 2, color: colors.teal },
-    { label: "Placar Perdedor", pts: 1, color: colors.purple },
-    { label: "Goleada (extra)", pts: 1, color: colors.orange },
-  ];
+function RankingTab({
+  members, myUid, refreshing, onRefresh, insetBottom,
+}: {
+  members: Member[]; myUid?: string;
+  refreshing: boolean; onRefresh: () => void; insetBottom: number;
+}) {
   return (
-    <View style={{ padding: 16, gap: 8 }}>
-      <Text style={{ color: colors.text, fontSize: 18, fontWeight: "bold", marginBottom: 8 }}>
-        Pontos Base
-      </Text>
-      <Text style={{ color: colors.textMuted, marginBottom: 8 }}>
-        3 pts por acertar o vencedor (ou empate). Os bônus abaixo são cumulativos.
-      </Text>
-      {rules.map((r) => (
-        <View key={r.label} style={{ flexDirection: "row", justifyContent: "space-between" }}>
-          <Text style={{ color: colors.text, fontSize: 14 }}>{r.label}</Text>
-          <Text style={{ color: r.color, fontWeight: "bold" }}>+{r.pts} pts</Text>
-        </View>
-      ))}
-      <Text style={{ color: colors.textMuted, marginTop: 12, fontSize: 12 }}>
-        * Os bônus só contam se você acertou o vencedor/empate.
-        Goleada = diferença de 4 gols ou mais.
-      </Text>
-    </View>
+    <FlatList
+      data={members}
+      keyExtractor={(m) => m.id}
+      contentContainerStyle={[styles.list, { paddingBottom: insetBottom + spacing.xl }]}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
+      ListEmptyComponent={<EmptyState icon="podium-outline" title="Ranking vazio" subtitle="Faça palpites para pontuar." />}
+      renderItem={({ item, index }) => (
+        <FadeIn delay={index * 40}>
+          <RankRow member={item} position={index + 1} isMe={item.id === myUid} />
+        </FadeIn>
+      )}
+    />
+  );
+}
+
+const MEDAL: Record<number, string> = { 1: palette.gold, 2: palette.silver, 3: palette.bronze };
+
+function RankRow({ member, position, isMe }: { member: Member; position: number; isMe: boolean }) {
+  const medal = MEDAL[position];
+  return (
+    <Card highlight={isMe} style={styles.rankRow}>
+      <View style={styles.rankPos}>
+        {medal ? (
+          <Ionicons name="medal" size={22} color={medal} />
+        ) : (
+          <Text variant="subtitle" color={palette.textMuted}>{position}</Text>
+        )}
+      </View>
+      <Avatar name={member.displayName} size={42} ring={isMe} />
+      <View style={{ flex: 1 }}>
+        <Text variant="bodyMed" numberOfLines={1}>
+          {member.displayName}{isMe ? " (você)" : ""}
+        </Text>
+        <Text variant="caption" color={palette.textMuted}>
+          {member.exactCount ?? 0} placares exatos · {member.correctCount ?? 0} acertos
+        </Text>
+      </View>
+      <View style={styles.rankPts}>
+        <Text variant="heading" color={position <= 3 ? palette.primary : palette.text}>
+          {member.totalPoints}
+        </Text>
+        <Text variant="caption" color={palette.textMuted}>pts</Text>
+      </View>
+    </Card>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
-  center: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: colors.bg },
   header: {
-    padding: 16, flexDirection: "row",
-    justifyContent: "space-between", alignItems: "center",
-    borderBottomWidth: 1, borderBottomColor: colors.divider,
+    paddingHorizontal: spacing.xl, paddingBottom: spacing.lg, gap: 2,
+    borderBottomWidth: 1, borderBottomColor: palette.border,
   },
-  groupName: { color: colors.text, fontSize: 18, fontWeight: "bold", flex: 1 },
+  headerTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm },
+  headerBtn: { marginLeft: -spacing.xs },
   inviteBtn: {
-    backgroundColor: colors.card,
-    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6,
-    borderWidth: 1, borderColor: colors.cardBorder,
+    flexDirection: "row", alignItems: "center", gap: spacing.xs,
+    backgroundColor: palette.primaryGlow, paddingHorizontal: spacing.md, paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
   },
-  inviteText: { color: colors.primary, fontSize: 13, fontWeight: "600" },
-  tabs: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: colors.divider },
-  tab: { flex: 1, padding: 12, alignItems: "center" },
-  tabActive: { borderBottomWidth: 2, borderBottomColor: colors.primary },
-  tabText: { color: colors.textMuted, fontWeight: "600" },
-  tabTextActive: { color: colors.primary },
-  list: { padding: 16, gap: 10 },
-  memberCard: {
-    backgroundColor: colors.card,
-    borderRadius: 10, padding: 14,
-    flexDirection: "row", alignItems: "center", gap: 12,
-    borderWidth: 1, borderColor: colors.cardBorder,
+  segment: {
+    flexDirection: "row", marginTop: spacing.lg, backgroundColor: palette.bg,
+    borderRadius: radius.md, padding: 4, gap: 4,
   },
-  myCard: { borderColor: colors.primary },
-  rank: { color: colors.textMuted, fontSize: 16, fontWeight: "bold", width: 28 },
-  memberName: { color: colors.text, fontSize: 15, flex: 1 },
-  pts: { color: colors.green, fontWeight: "bold" },
-  matchCard: {
-    backgroundColor: colors.card,
-    borderRadius: 12, padding: 14, gap: 8,
-    borderWidth: 1, borderColor: colors.cardBorder,
+  segmentItem: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: spacing.xs, paddingVertical: spacing.sm, borderRadius: radius.sm,
   },
-  matchRow: { flexDirection: "row", alignItems: "center" },
-  matchTeam: { flex: 1, color: colors.text, fontSize: 13, fontWeight: "600" },
-  matchScore: { color: colors.text, fontSize: 18, fontWeight: "bold", paddingHorizontal: 8 },
-  matchVs: { color: colors.textMuted, paddingHorizontal: 8 },
-  matchMeta: { flexDirection: "row", justifyContent: "space-between" },
-  myBetText: { color: colors.teal, fontSize: 12 },
-  betCta: { color: colors.primary, fontSize: 12, fontWeight: "600" },
-  noBet: { color: colors.textMuted, fontSize: 12 },
-  matchStatus: { fontSize: 11, fontWeight: "600" },
-  // Expose color vars used in RulesTab inline
-  teal: { color: colors.teal },
-  purple: { color: colors.purple },
-  orange: { color: colors.orange },
+  segmentActive: { backgroundColor: palette.primary },
+  list: { padding: spacing.xl, gap: spacing.md, flexGrow: 1 },
+  rankRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  rankPos: { width: 28, alignItems: "center" },
+  rankPts: { alignItems: "center", minWidth: 40 },
 });

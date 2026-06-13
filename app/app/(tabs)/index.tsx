@@ -1,250 +1,208 @@
-/**
- * Tela "Grupos" — lista os grupos do usuário e botões para criar ou entrar.
- */
 import React, { useState } from "react";
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet,
-  Modal, TextInput, ActivityIndicator, Alert,
+  View, FlatList, StyleSheet, Modal, Pressable,
+  KeyboardAvoidingView, Platform, RefreshControl,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  collection, query, getDocs, addDoc, doc,
-  serverTimestamp, where, orderBy,
-} from "firebase/firestore";
-import { httpsCallable } from "firebase/functions";
-import { db, fns } from "@/lib/firebase";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/hooks/useAuth";
-import { colors } from "@/lib/colors";
-
-interface GroupItem { id: string; name: string; totalPoints?: number }
-
-function useMyGroups(uid: string) {
-  return useQuery({
-    queryKey: ["groups", uid],
-    queryFn: async () => {
-      const membersQ = query(
-        collection(db, "groups"),
-        where(`members.${uid}`, "!=", null)
-      );
-      // Simpler: scan members subcollection via collectionGroup
-      const snap = await getDocs(
-        query(collection(db, "groups"), orderBy("createdAt", "desc"))
-      );
-      // Filter client-side for groups where user is a member
-      const groups: GroupItem[] = [];
-      for (const g of snap.docs) {
-        const memberSnap = await getDocs(collection(db, "groups", g.id, "members"));
-        if (memberSnap.docs.some((m) => m.id === uid)) {
-          const memberDoc = memberSnap.docs.find((m) => m.id === uid);
-          groups.push({
-            id: g.id,
-            name: g.data().name as string,
-            totalPoints: memberDoc?.data()?.totalPoints as number | undefined,
-          });
-        }
-      }
-      return groups;
-    },
-    enabled: !!uid,
-  });
-}
+import { useMyGroups, useCreateGroup, useJoinGroup } from "@/lib/data";
+import {
+  Screen, Text, Button, Card, Input, EmptyState, SkeletonCard, FadeIn,
+} from "@/components/ui";
+import { palette, spacing, radius } from "@/lib/theme";
+import type { GroupSummary } from "@/lib/types";
 
 export default function GroupsScreen() {
   const { user } = useAuth();
   const router = useRouter();
-  const qc = useQueryClient();
-  const { data: groups, isLoading } = useMyGroups(user?.uid ?? "");
+  const insets = useSafeAreaInsets();
+  const { data: groups, isLoading, refetch, isRefetching } = useMyGroups(user?.uid);
 
-  const [createModal, setCreateModal] = useState(false);
-  const [joinModal, setJoinModal] = useState(false);
-  const [groupName, setGroupName] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
-
-  const createMutation = useMutation({
-    mutationFn: async (name: string) => {
-      const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-      const ref = await addDoc(collection(db, "groups"), {
-        name,
-        ownerId: user!.uid,
-        inviteCode: code,
-        createdAt: serverTimestamp(),
-      });
-      await addDoc(collection(db, "groups", ref.id, "members"), {
-        userId: user!.uid, // stored as doc with id = uid below
-      });
-      // Use setDoc for consistent doc id
-      const { setDoc } = await import("firebase/firestore");
-      await setDoc(doc(db, "groups", ref.id, "members", user!.uid), {
-        displayName: user!.displayName ?? "Você",
-        role: "owner",
-        totalPoints: 0,
-        joinedAt: serverTimestamp(),
-      });
-      return ref.id;
-    },
-    onSuccess: (groupId) => {
-      qc.invalidateQueries({ queryKey: ["groups"] });
-      setCreateModal(false);
-      setGroupName("");
-      router.push(`/group/${groupId}`);
-    },
-    onError: () => Alert.alert("Erro", "Não foi possível criar o grupo."),
-  });
-
-  const joinMutation = useMutation({
-    mutationFn: async (code: string) => {
-      const fn = httpsCallable<{ inviteCode: string }, { groupId: string; name: string }>(
-        fns, "joinGroup"
-      );
-      return fn({ inviteCode: code });
-    },
-    onSuccess: (res) => {
-      qc.invalidateQueries({ queryKey: ["groups"] });
-      setJoinModal(false);
-      setInviteCode("");
-      router.push(`/group/${res.data.groupId}`);
-    },
-    onError: () => Alert.alert("Erro", "Código inválido ou grupo não encontrado."),
-  });
+  const [sheet, setSheet] = useState<null | "create" | "join">(null);
 
   return (
-    <View style={styles.container}>
+    <Screen edges={{ top: true }}>
+      <View style={styles.header}>
+        <View>
+          <Text variant="caption" color={palette.textMuted}>Olá,</Text>
+          <Text variant="title">{user?.displayName?.split(" ")[0] ?? "jogador"} 👋</Text>
+        </View>
+        <Pressable style={styles.iconBtn} onPress={() => router.push("/(tabs)/profile")}>
+          <Ionicons name="person-circle-outline" size={28} color={palette.textMuted} />
+        </Pressable>
+      </View>
+
       {isLoading ? (
-        <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+        <View style={styles.list}>
+          {[0, 1, 2].map((i) => <SkeletonCard key={i} />)}
+        </View>
       ) : (
         <FlatList
           data={groups ?? []}
           keyExtractor={(g) => g.id}
-          contentContainerStyle={styles.list}
-          ListEmptyComponent={
-            <Text style={styles.empty}>Você ainda não participa de nenhum grupo.</Text>
+          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 160 }]}
+          refreshControl={
+            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={palette.primary} />
           }
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.card}
-              onPress={() => router.push(`/group/${item.id}`)}
-            >
-              <Text style={styles.groupName}>{item.name}</Text>
-              {item.totalPoints !== undefined && (
-                <Text style={styles.pts}>{item.totalPoints} pts</Text>
-              )}
-            </TouchableOpacity>
+          ListEmptyComponent={
+            <EmptyState
+              icon="people-outline"
+              title="Nenhum grupo ainda"
+              subtitle="Crie um bolão e convide a galera, ou entre em um grupo com o código de convite."
+            />
+          }
+          renderItem={({ item, index }) => (
+            <FadeIn delay={index * 60}>
+              <GroupCard group={item} onPress={() => router.push(`/group/${item.id}`)} />
+            </FadeIn>
           )}
         />
       )}
 
-      <View style={styles.actions}>
-        <TouchableOpacity style={styles.btnSecondary} onPress={() => setJoinModal(true)}>
-          <Text style={styles.btnSecondaryText}>Entrar com código</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.btn} onPress={() => setCreateModal(true)}>
-          <Text style={styles.btnText}>+ Criar grupo</Text>
-        </TouchableOpacity>
+      <View style={[styles.actions, { paddingBottom: insets.bottom + spacing.md }]}>
+        <Button title="Entrar com código" variant="secondary" icon="enter-outline"
+          onPress={() => setSheet("join")} style={{ flex: 1 }} />
+        <Button title="Criar bolão" icon="add" onPress={() => setSheet("create")} style={{ flex: 1 }} />
       </View>
 
-      {/* Modal criar grupo */}
-      <Modal visible={createModal} transparent animationType="fade">
-        <View style={styles.overlay}>
-          <View style={styles.modal}>
-            <Text style={styles.modalTitle}>Novo grupo</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Nome do grupo"
-              placeholderTextColor={colors.textMuted}
-              value={groupName}
-              onChangeText={setGroupName}
-            />
-            <TouchableOpacity
-              style={[styles.btn, createMutation.isPending && styles.btnDisabled]}
-              onPress={() => groupName.trim() && createMutation.mutate(groupName.trim())}
-              disabled={createMutation.isPending}
-            >
-              {createMutation.isPending
-                ? <ActivityIndicator color="#fff" />
-                : <Text style={styles.btnText}>Criar</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setCreateModal(false)}>
-              <Text style={styles.cancel}>Cancelar</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      <GroupSheet
+        mode={sheet}
+        onClose={() => setSheet(null)}
+        onCreated={(id) => { setSheet(null); router.push(`/group/${id}`); }}
+      />
+    </Screen>
+  );
+}
 
-      {/* Modal entrar */}
-      <Modal visible={joinModal} transparent animationType="fade">
-        <View style={styles.overlay}>
-          <View style={styles.modal}>
-            <Text style={styles.modalTitle}>Entrar em um grupo</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Código de convite"
-              placeholderTextColor={colors.textMuted}
-              autoCapitalize="characters"
-              value={inviteCode}
-              onChangeText={setInviteCode}
-            />
-            <TouchableOpacity
-              style={[styles.btn, joinMutation.isPending && styles.btnDisabled]}
-              onPress={() => inviteCode.trim() && joinMutation.mutate(inviteCode.trim())}
-              disabled={joinMutation.isPending}
-            >
-              {joinMutation.isPending
-                ? <ActivityIndicator color="#fff" />
-                : <Text style={styles.btnText}>Entrar</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setJoinModal(false)}>
-              <Text style={styles.cancel}>Cancelar</Text>
-            </TouchableOpacity>
-          </View>
+function GroupCard({ group, onPress }: { group: GroupSummary; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => pressed && { opacity: 0.7 }}>
+      <Card style={styles.groupCard}>
+        <View style={styles.groupIcon}>
+          <Ionicons name="trophy" size={22} color={palette.primary} />
         </View>
-      </Modal>
-    </View>
+        <View style={{ flex: 1 }}>
+          <Text variant="subtitle" numberOfLines={1}>{group.name}</Text>
+          <Text variant="caption" color={palette.textMuted}>
+            {group.memberCount} {group.memberCount === 1 ? "participante" : "participantes"}
+            {group.role === "owner" ? " · você é o dono" : ""}
+          </Text>
+        </View>
+        <View style={styles.groupPts}>
+          <Text variant="heading" color={palette.primary}>{group.totalPoints}</Text>
+          <Text variant="caption" color={palette.textMuted}>pts</Text>
+        </View>
+      </Card>
+    </Pressable>
+  );
+}
+
+function GroupSheet({
+  mode, onClose, onCreated,
+}: { mode: null | "create" | "join"; onClose: () => void; onCreated: (id: string) => void }) {
+  const { user } = useAuth();
+  const insets = useSafeAreaInsets();
+  const create = useCreateGroup();
+  const join = useJoinGroup();
+  const [value, setValue] = useState("");
+  const [error, setError] = useState("");
+
+  const visible = mode !== null;
+  const isCreate = mode === "create";
+
+  React.useEffect(() => {
+    if (visible) { setValue(""); setError(""); }
+  }, [visible, mode]);
+
+  async function submit() {
+    if (!value.trim() || !user) return;
+    setError("");
+    try {
+      if (isCreate) {
+        const id = await create.mutateAsync({
+          uid: user.uid,
+          displayName: user.displayName ?? "Você",
+          name: value.trim(),
+        });
+        onCreated(id);
+      } else {
+        const res = await join.mutateAsync(value.trim());
+        onCreated(res.groupId);
+      }
+    } catch (e) {
+      setError(isCreate
+        ? "Não foi possível criar o grupo."
+        : "Código inválido ou grupo não encontrado.");
+    }
+  }
+
+  const pending = create.isPending || join.isPending;
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose} />
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <View style={[styles.sheet, { paddingBottom: insets.bottom + spacing.xl }]}>
+          <View style={styles.handle} />
+          <Text variant="heading">{isCreate ? "Criar bolão" : "Entrar em um grupo"}</Text>
+          <Text variant="body" color={palette.textMuted}>
+            {isCreate
+              ? "Dê um nome ao seu grupo. Você poderá convidar amigos por um código."
+              : "Digite o código de convite que você recebeu."}
+          </Text>
+          <Input
+            icon={isCreate ? "trophy-outline" : "key-outline"}
+            placeholder={isCreate ? "Ex: Bolão da firma" : "Ex: ABC123"}
+            autoCapitalize={isCreate ? "sentences" : "characters"}
+            autoFocus
+            value={value}
+            onChangeText={setValue}
+            error={error}
+            maxLength={isCreate ? 40 : 6}
+            onSubmitEditing={submit}
+          />
+          <Button
+            title={isCreate ? "Criar e abrir" : "Entrar"}
+            onPress={submit}
+            loading={pending}
+            disabled={!value.trim()}
+          />
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
-  list: { padding: 16, gap: 12 },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: 12, padding: 16,
-    borderWidth: 1, borderColor: colors.cardBorder,
+  header: {
     flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+    paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.lg,
   },
-  groupName: { color: colors.text, fontSize: 16, fontWeight: "600", flex: 1 },
-  pts: { color: colors.green, fontWeight: "bold", fontSize: 14 },
-  empty: { color: colors.textMuted, textAlign: "center", marginTop: 40, fontSize: 15 },
+  iconBtn: { padding: spacing.xs },
+  list: { paddingHorizontal: spacing.xl, gap: spacing.md, flexGrow: 1 },
+  groupCard: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  groupIcon: {
+    width: 46, height: 46, borderRadius: radius.md,
+    backgroundColor: palette.primaryGlow, alignItems: "center", justifyContent: "center",
+  },
+  groupPts: { alignItems: "center", minWidth: 44 },
   actions: {
-    padding: 16, gap: 10,
-    borderTopWidth: 1, borderTopColor: colors.divider,
+    position: "absolute", left: 0, right: 0, bottom: 0,
+    flexDirection: "row", gap: spacing.md,
+    paddingHorizontal: spacing.xl, paddingTop: spacing.md,
+    backgroundColor: palette.bg, borderTopWidth: 1, borderTopColor: palette.border,
   },
-  btn: {
-    backgroundColor: colors.primary,
-    borderRadius: 10, padding: 14, alignItems: "center",
+  backdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.6)" },
+  sheet: {
+    backgroundColor: palette.bgElevated,
+    borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl,
+    padding: spacing.xl, gap: spacing.md,
+    borderTopWidth: 1, borderColor: palette.border,
   },
-  btnDisabled: { opacity: 0.6 },
-  btnText: { color: "#fff", fontWeight: "bold", fontSize: 15 },
-  btnSecondary: {
-    borderColor: colors.primary, borderWidth: 1,
-    borderRadius: 10, padding: 14, alignItems: "center",
+  handle: {
+    width: 40, height: 4, borderRadius: 2, backgroundColor: palette.border,
+    alignSelf: "center", marginBottom: spacing.sm,
   },
-  btnSecondaryText: { color: colors.primary, fontWeight: "bold", fontSize: 15 },
-  overlay: {
-    flex: 1, backgroundColor: "rgba(0,0,0,0.6)",
-    justifyContent: "center", padding: 24,
-  },
-  modal: {
-    backgroundColor: colors.card,
-    borderRadius: 16, padding: 24, gap: 14,
-    borderWidth: 1, borderColor: colors.cardBorder,
-  },
-  modalTitle: { color: colors.text, fontSize: 18, fontWeight: "bold" },
-  input: {
-    backgroundColor: colors.inputBg,
-    borderColor: colors.inputBorder,
-    borderWidth: 1, borderRadius: 10,
-    color: colors.text, padding: 12, fontSize: 16,
-  },
-  cancel: { color: colors.textMuted, textAlign: "center", marginTop: 4 },
 });
