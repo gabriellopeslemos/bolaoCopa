@@ -112,10 +112,17 @@ npm run test:rules
 
 ### 4b. Popular jogos de demonstração (opcional)
 
-```bash
 # Suba o emulador em outro terminal: firebase emulators:start --only firestore
+
+# bash / macOS / Linux:
+```bash
 FIRESTORE_EMULATOR_HOST=localhost:8080 GOOGLE_CLOUD_PROJECT=demo-bolaocopa \
   node scripts/seed.mjs
+```
+
+# PowerShell (Windows):
+```powershell
+$env:FIRESTORE_EMULATOR_HOST="localhost:8080"; $env:GOOGLE_CLOUD_PROJECT="demo-bolaocopa"; node scripts/seed.mjs
 ```
 
 ### 5. Rodar o app em desenvolvimento
