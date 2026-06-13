@@ -4,6 +4,8 @@
   "description": "Lógica de pontuação do bolão (função pura compartilhada entre app e Cloud Functions)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "react-native": "src/index.ts",
+  "source": "src/index.ts",
   "files": [
     "dist",
     "src"
