@@ -4,12 +4,23 @@ App de bolão da Copa do Mundo para Android e iOS, construído com **Expo (React
 
 ## Funcionalidades
 
-- Criar grupos com amigos via código de convite
-- Fazer palpites nos placares das partidas
-- Ranking em tempo real por grupo
+- Criar grupos com amigos via código de convite (compartilhável)
+- Fazer palpites nos placares com seletor +/− e preview de pontos ao vivo
+- Ranking por grupo com pódio (medalhas), avatares e estatísticas
 - Sistema de pontuação cumulativo (ver abaixo)
 - Sincronização automática de jogos via API-Football
 - Painel de admin para lançar resultados manualmente
+- Login persistente, tema escuro, tipografia Inter, ícones, gradientes e haptics
+
+## Design / UX
+
+- **Tema escuro premium** com acento verde (mesma identidade da tela de pontos)
+- **Tipografia Inter** (`@expo-google-fonts/inter`) em todos os pesos
+- **Design system** próprio em `app/components/ui` (Button, Card, Input, Avatar,
+  Text, Screen, EmptyState, Skeleton, FadeIn)
+- Micro-interações: animação de entrada das listas, escala/haptic nos botões,
+  pull-to-refresh, skeletons de carregamento e estados vazios ilustrados
+- Ícones vetoriais (`@expo/vector-icons` / Ionicons) e gradientes (`expo-linear-gradient`)
 
 ## Sistema de Pontuação
 
@@ -28,11 +39,28 @@ Placar exato = todos os bônus ativados = máximo de 14 pts (ou 15 com goleada).
 ## Estrutura
 
 ```
-/app          → Aplicativo Expo (React Native + TypeScript)
-/functions    → Firebase Cloud Functions (TypeScript)
-/packages/scoring → Lógica de pontuação (função pura + testes)
-firestore.rules   → Regras de segurança do Firestore
-firebase.json     → Configuração do Firebase
+/app                  → Aplicativo Expo (React Native + TypeScript)
+  /app                → Rotas (expo-router): (auth), (tabs), group/*
+  /components/ui      → Design system (Button, Card, Input, Avatar, …)
+  /components         → MatchCard, ScoreStepper, TeamCrest, ScoringRulesCard
+  /lib                → firebase, data (hooks React Query), theme, types
+/functions            → Firebase Cloud Functions (TypeScript)
+/packages/scoring     → Lógica de pontuação (função pura + testes)
+/tests                → Testes das regras do Firestore (emulador)
+/scripts/seed.mjs     → Popula jogos de demonstração
+firestore.rules       → Regras de segurança do Firestore
+firebase.json         → Configuração do Firebase
+```
+
+### Modelo de dados (Firestore)
+
+```
+users/{uid}                          perfil
+users/{uid}/memberships/{groupId}    índice dos grupos do usuário (para listar)
+groups/{groupId}                     nome, dono, inviteCode, memberCount
+groups/{groupId}/members/{uid}       pontos denormalizados (ranking) + estatísticas
+groups/{groupId}/bets/{uid_matchId}  palpite (score, points, breakdown)
+matches/{matchId}                    partidas (times, kickoff, status, score)
 ```
 
 ## Pré-requisitos
@@ -69,11 +97,22 @@ firebase functions:secrets:set FOOTBALL_API_KEY
 # Cole sua chave da API-Football quando solicitado
 ```
 
-### 4. Rodar os testes de pontuação
+### 4. Rodar os testes
 
 ```bash
-npm test --workspace @bolao/scoring
-# 14 testes devem passar
+# Lógica de pontuação (14 testes unitários)
+npm test
+
+# Regras de segurança do Firestore (13 testes no emulador — requer Java)
+npm run test:rules
+```
+
+### 4b. Popular jogos de demonstração (opcional)
+
+```bash
+# Suba o emulador em outro terminal: firebase emulators:start --only firestore
+FIRESTORE_EMULATOR_HOST=localhost:8080 GOOGLE_CLOUD_PROJECT=demo-bolaocopa \
+  node scripts/seed.mjs
 ```
 
 ### 5. Rodar o app em desenvolvimento

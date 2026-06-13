@@ -1,84 +1,84 @@
-import React from "react";
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, StyleSheet, Alert, Pressable } from "react-native";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { getIdTokenResult } from "firebase/auth";
 import { signOut } from "@/lib/auth";
 import { useAuth } from "@/hooks/useAuth";
-import { colors } from "@/lib/colors";
+import { Screen, Text, Card, Button, Avatar } from "@/components/ui";
+import { palette, spacing, radius } from "@/lib/theme";
 
 export default function ProfileScreen() {
   const { user } = useAuth();
   const router = useRouter();
+  const [isAdmin, setIsAdmin] = useState(false);
 
-  async function handleSignOut() {
-    Alert.alert("Sair", "Tem certeza que deseja sair?", [
+  useEffect(() => {
+    if (!user) return;
+    getIdTokenResult(user)
+      .then((r) => setIsAdmin(r.claims.admin === true))
+      .catch(() => {});
+  }, [user]);
+
+  function handleSignOut() {
+    Alert.alert("Sair da conta", "Tem certeza que deseja sair?", [
       { text: "Cancelar", style: "cancel" },
-      {
-        text: "Sair",
-        style: "destructive",
-        onPress: async () => {
-          await signOut();
-          router.replace("/(auth)/login");
-        },
-      },
+      { text: "Sair", style: "destructive", onPress: () => signOut() },
     ]);
   }
 
+  const name = user?.displayName ?? "Jogador";
+
   return (
-    <View style={styles.container}>
-      <View style={styles.avatar}>
-        <Text style={styles.avatarText}>
-          {(user?.displayName ?? user?.email ?? "?")[0].toUpperCase()}
-        </Text>
-      </View>
-      <Text style={styles.name}>{user?.displayName ?? "Usuário"}</Text>
-      <Text style={styles.email}>{user?.email}</Text>
-
-      <View style={styles.section}>
-        <TouchableOpacity
-          style={styles.row}
-          onPress={() => router.push("/admin")}
-        >
-          <Text style={styles.rowLabel}>⚙️  Administração</Text>
-          <Text style={styles.arrow}>›</Text>
-        </TouchableOpacity>
+    <Screen edges={{ top: true, bottom: true }} style={styles.screen}>
+      <View style={styles.hero}>
+        <Avatar name={name} size={88} ring />
+        <Text variant="title" center style={{ marginTop: spacing.md }}>{name}</Text>
+        <Text variant="body" color={palette.textMuted}>{user?.email}</Text>
       </View>
 
-      <TouchableOpacity style={styles.logoutBtn} onPress={handleSignOut}>
-        <Text style={styles.logoutText}>Sair da conta</Text>
-      </TouchableOpacity>
-    </View>
+      <Card padded={false} style={styles.menu}>
+        <Row icon="football-outline" label="Ver todos os jogos" onPress={() => router.push("/(tabs)/matches")} />
+        <Divider />
+        <Row icon="trophy-outline" label="Meus grupos" onPress={() => router.push("/(tabs)")} />
+        {isAdmin && (
+          <>
+            <Divider />
+            <Row icon="settings-outline" label="Administração" tint={palette.cyan}
+              onPress={() => router.push("/admin")} />
+          </>
+        )}
+      </Card>
+
+      <View style={{ flex: 1 }} />
+      <Button title="Sair da conta" variant="danger" icon="log-out-outline" onPress={handleSignOut} />
+      <Text variant="caption" color={palette.textFaint} center style={{ marginTop: spacing.md }}>
+        Bolão Copa · v1.0.0
+      </Text>
+    </Screen>
   );
 }
 
+function Row({
+  icon, label, onPress, tint,
+}: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; tint?: string }) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}>
+      <Ionicons name={icon} size={22} color={tint ?? palette.textMuted} />
+      <Text variant="bodyMed" style={{ flex: 1 }} color={tint ?? palette.text}>{label}</Text>
+      <Ionicons name="chevron-forward" size={18} color={palette.textFaint} />
+    </Pressable>
+  );
+}
+
+function Divider() {
+  return <View style={styles.divider} />;
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1, backgroundColor: colors.bg,
-    padding: 24, alignItems: "center",
-  },
-  avatar: {
-    width: 80, height: 80, borderRadius: 40,
-    backgroundColor: colors.primary,
-    justifyContent: "center", alignItems: "center",
-    marginTop: 24, marginBottom: 16,
-  },
-  avatarText: { color: "#fff", fontSize: 32, fontWeight: "bold" },
-  name: { color: colors.text, fontSize: 20, fontWeight: "bold", marginBottom: 4 },
-  email: { color: colors.textMuted, fontSize: 14, marginBottom: 32 },
-  section: {
-    width: "100%",
-    backgroundColor: colors.card, borderRadius: 12,
-    borderWidth: 1, borderColor: colors.cardBorder, marginBottom: 24,
-  },
-  row: {
-    flexDirection: "row", justifyContent: "space-between",
-    alignItems: "center", padding: 16,
-  },
-  rowLabel: { color: colors.text, fontSize: 15 },
-  arrow: { color: colors.textMuted, fontSize: 18 },
-  logoutBtn: {
-    width: "100%",
-    borderColor: colors.red, borderWidth: 1,
-    borderRadius: 10, padding: 14, alignItems: "center",
-  },
-  logoutText: { color: colors.red, fontWeight: "bold", fontSize: 15 },
+  screen: { paddingHorizontal: spacing.xl, paddingTop: spacing.xl },
+  hero: { alignItems: "center", marginBottom: spacing.xxl },
+  menu: { overflow: "hidden" },
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.lg },
+  divider: { height: 1, backgroundColor: palette.border, marginLeft: spacing.lg + 22 + spacing.md },
 });

@@ -140,23 +140,41 @@ export const joinGroup = onCall(async (req) => {
   if (snap.empty) throw new HttpsError("not-found", "Grupo não encontrado para este código.");
 
   const groupRef = snap.docs[0].ref;
+  const groupName = snap.docs[0].data().name as string;
   const userSnap = await db.collection("users").doc(uid).get();
   const displayName =
     (userSnap.data()?.displayName as string | undefined) ||
     req.auth?.token.name ||
     "Participante";
 
-  await groupRef.collection("members").doc(uid).set(
+  const memberRef = groupRef.collection("members").doc(uid);
+  const alreadyMember = (await memberRef.get()).exists;
+
+  const batch = db.batch();
+  batch.set(
+    memberRef,
     {
       displayName,
       role: "member",
       totalPoints: 0,
+      exactCount: 0,
+      correctCount: 0,
       joinedAt: FieldValue.serverTimestamp(),
     },
     { merge: true }
   );
+  // Índice de participações do usuário (usado para listar os grupos).
+  batch.set(db.collection("users").doc(uid).collection("memberships").doc(groupRef.id), {
+    name: groupName,
+    role: "member",
+    joinedAt: FieldValue.serverTimestamp(),
+  });
+  if (!alreadyMember) {
+    batch.set(groupRef, { memberCount: FieldValue.increment(1) }, { merge: true });
+  }
+  await batch.commit();
 
-  return { groupId: groupRef.id, name: snap.docs[0].data().name };
+  return { groupId: groupRef.id, name: groupName };
 });
 
 /** Verifica se o usuário é admin (custom claim `admin: true`). */

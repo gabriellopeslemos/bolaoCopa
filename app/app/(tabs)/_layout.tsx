@@ -1,18 +1,25 @@
-import { Text } from "react-native";
 import { Tabs } from "expo-router";
-import type { ColorValue } from "react-native";
-import { colors } from "@/lib/colors";
+import { Ionicons } from "@expo/vector-icons";
+import { Platform } from "react-native";
+import { palette } from "@/lib/theme";
 
 export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarStyle: { backgroundColor: colors.tabBar, borderTopColor: colors.divider },
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textMuted,
-        headerStyle: { backgroundColor: colors.bg },
-        headerTintColor: colors.text,
-        headerTitleStyle: { fontWeight: "bold" },
+        tabBarStyle: {
+          backgroundColor: palette.bgElevated,
+          borderTopColor: palette.border,
+          borderTopWidth: 1,
+          height: Platform.OS === "ios" ? 88 : 64,
+          paddingTop: 8,
+        },
+        tabBarActiveTintColor: palette.primary,
+        tabBarInactiveTintColor: palette.textFaint,
+        tabBarLabelStyle: { fontFamily: "Inter_600SemiBold", fontSize: 11 },
+        headerStyle: { backgroundColor: palette.bg },
+        headerTintColor: palette.text,
+        headerTitleStyle: { fontFamily: "Inter_700Bold", fontSize: 20 },
         headerShadowVisible: false,
       }}
     >
@@ -20,30 +27,29 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: "Grupos",
-          tabBarLabel: "Grupos",
-          tabBarIcon: ({ color }) => <TabIcon emoji="🏆" color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "trophy" : "trophy-outline"} size={24} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="matches"
         options={{
           title: "Jogos",
-          tabBarLabel: "Jogos",
-          tabBarIcon: ({ color }) => <TabIcon emoji="⚽" color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "football" : "football-outline"} size={24} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: "Perfil",
-          tabBarLabel: "Perfil",
-          tabBarIcon: ({ color }) => <TabIcon emoji="👤" color={color} />,
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? "person" : "person-outline"} size={24} color={color} />
+          ),
         }}
       />
     </Tabs>
   );
-}
-
-function TabIcon({ emoji, color }: { emoji: string; color: ColorValue }) {
-  return <Text style={{ fontSize: 20, color }}>{emoji}</Text>;
 }

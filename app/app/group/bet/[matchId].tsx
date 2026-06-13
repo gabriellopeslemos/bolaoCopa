@@ -1,199 +1,125 @@
-/**
- * Tela de palpite.
- * O usuário escolhe o placar antes do início do jogo.
- * Exibe o preview de pontos potenciais em tempo real.
- */
-import React, { useState } from "react";
-import {
-  View, Text, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Alert, ScrollView,
-} from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, StyleSheet, ScrollView, Alert } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  collection, doc, getDocs, getDoc, query,
-  setDoc, serverTimestamp, where,
-  type Timestamp,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import * as Haptics from "expo-haptics";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/hooks/useAuth";
-import { colors } from "@/lib/colors";
-import { ScoreInput } from "@/components/ScoreInput";
-import { PointsBadge } from "@/components/PointsBadge";
-import {
-  calculatePoints, maxPossiblePoints,
-  DEFAULT_SCORING_CONFIG, type Score,
-} from "@bolao/scoring";
+import { useMatch, useMyBets, usePlaceBet } from "@/lib/data";
+import { Screen, Text, Card, Button } from "@/components/ui";
+import { ScoreStepper } from "@/components/ScoreStepper";
+import { ScoringRulesCard } from "@/components/ScoringRulesCard";
+import { palette, spacing, radius } from "@/lib/theme";
+import { formatKickoff } from "@/lib/format";
+import { maxPossiblePoints, type Score } from "@bolao/scoring";
 
 export default function BetScreen() {
   const { matchId, groupId } = useLocalSearchParams<{ matchId: string; groupId: string }>();
   const { user } = useAuth();
   const router = useRouter();
-  const qc = useQueryClient();
+  const insets = useSafeAreaInsets();
 
-  const { data: match, isLoading: mLoading } = useQuery({
-    queryKey: ["match", matchId],
-    queryFn: async () => {
-      const snap = await getDoc(doc(db, "matches", matchId!));
-      return { id: snap.id, ...snap.data() } as {
-        id: string;
-        home: { name: string };
-        away: { name: string };
-        kickoff: Timestamp;
-        status: string;
-        score: Score | null;
-      };
-    },
-    enabled: !!matchId,
-  });
+  const match = useMatch(matchId);
+  const myBets = useMyBets(groupId, user?.uid);
+  const placeBet = usePlaceBet(groupId!, user?.uid ?? "", user?.displayName ?? "Você");
 
-  const { data: existingBet } = useQuery({
-    queryKey: ["myBet", groupId, matchId, user?.uid],
-    queryFn: async () => {
-      const snap = await getDocs(
-        query(
-          collection(db, "groups", groupId!, "bets"),
-          where("userId", "==", user!.uid),
-          where("matchId", "==", matchId!)
-        )
-      );
-      if (snap.empty) return null;
-      return snap.docs[0].data() as { score: Score; points: number };
-    },
-    enabled: !!groupId && !!matchId && !!user,
-  });
+  const [score, setScore] = useState<Score>({ home: 0, away: 0 });
+  const existing = myBets.data?.[matchId!];
 
-  const [bet, setBet] = useState<Score>({ home: 0, away: 0 });
+  useEffect(() => {
+    if (existing) setScore(existing.score);
+  }, [existing]);
 
-  // Populate from existing bet once loaded
-  React.useEffect(() => {
-    if (existingBet) setBet(existingBet.score);
-  }, [existingBet]);
+  const closed = match.data && match.data.status !== "scheduled";
+  const potential = maxPossiblePoints(score);
 
-  const preview = maxPossiblePoints(bet);
-
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      const betId = `${user!.uid}_${matchId}`;
-      await setDoc(
-        doc(db, "groups", groupId!, "bets", betId),
-        {
-          userId: user!.uid,
-          matchId: matchId!,
-          score: bet,
-          points: 0,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: false }
-      );
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["bets", groupId, user?.uid] });
-      Alert.alert("Palpite salvo!", "Boa sorte!", [
-        { text: "OK", onPress: () => router.back() },
-      ]);
-    },
-    onError: () => Alert.alert("Erro", "Não foi possível salvar o palpite."),
-  });
-
-  if (mLoading) {
-    return <View style={styles.center}><ActivityIndicator color={colors.primary} /></View>;
+  async function save() {
+    try {
+      await placeBet.mutateAsync({ matchId: matchId!, score });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      router.back();
+    } catch {
+      Alert.alert("Ops", "Não foi possível salvar o palpite. Tente novamente.");
+    }
   }
 
-  if (!match || match.status !== "scheduled") {
+  if (match.isLoading) {
+    return <Screen style={styles.center}><Text color={palette.textMuted}>Carregando…</Text></Screen>;
+  }
+  if (!match.data) {
+    return <Screen style={styles.center}><Text color={palette.textMuted}>Partida não encontrada.</Text></Screen>;
+  }
+  if (closed) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.msg}>Palpites encerrados para esta partida.</Text>
-      </View>
+      <Screen style={styles.center}>
+        <Text variant="heading" center>Palpites encerrados</Text>
+        <Text variant="body" color={palette.textMuted} center style={{ marginTop: spacing.xs }}>
+          Esta partida já começou.
+        </Text>
+        <Button title="Ver palpites" onPress={() => router.replace(`/group/match/${matchId}?groupId=${groupId}`)}
+          style={{ marginTop: spacing.lg }} />
+      </Screen>
     );
   }
 
-  const kickoffDate = match.kickoff?.toDate?.();
-  const kickoffStr = kickoffDate
-    ? kickoffDate.toLocaleDateString("pt-BR", {
-        weekday: "short", day: "2-digit", month: "2-digit",
-        hour: "2-digit", minute: "2-digit",
-      })
-    : "";
+  const m = match.data;
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.subtitle}>{kickoffStr}</Text>
+    <Screen>
+      <ScrollView
+        contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 100 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        <Text variant="caption" color={palette.textMuted} center>{m.round || "Partida"}</Text>
+        <Text variant="caption" color={palette.textFaint} center>{formatKickoff(m.kickoff)}</Text>
 
-      <View style={styles.inputCard}>
-        <ScoreInput
-          homeTeam={match.home.name}
-          awayTeam={match.away.name}
-          value={bet}
-          onChange={setBet}
+        <Card style={styles.pickCard}>
+          <View style={styles.steppers}>
+            <ScoreStepper team={m.home} value={score.home} onChange={(n) => setScore((s) => ({ ...s, home: n }))} />
+            <Text variant="title" color={palette.textFaint} style={{ marginTop: 52 }}>×</Text>
+            <ScoreStepper team={m.away} value={score.away} onChange={(n) => setScore((s) => ({ ...s, away: n }))} align="right" />
+          </View>
+
+          <View style={styles.potential}>
+            <Text variant="caption" color={palette.textMuted}>VALE ATÉ</Text>
+            <Text style={styles.potentialValue}>{potential} pts</Text>
+          </View>
+        </Card>
+
+        <ScoringRulesCard />
+
+        {existing && (
+          <Text variant="caption" color={palette.textMuted} center>
+            Você já palpitou {existing.score.home}-{existing.score.away}. Salvar substitui o palpite.
+          </Text>
+        )}
+      </ScrollView>
+
+      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+        <Button
+          title={existing ? "Atualizar palpite" : "Confirmar palpite"}
+          icon="checkmark-circle"
+          onPress={save}
+          loading={placeBet.isPending}
         />
       </View>
-
-      {/* Preview de pontos potenciais */}
-      <View style={styles.previewCard}>
-        <Text style={styles.previewTitle}>Pontos Base</Text>
-        <Text style={styles.previewSub}>3 pts por acertar o vencedor</Text>
-        <View style={styles.divider} />
-        <Text style={styles.previewBonus}>Bonus:</Text>
-        {[
-          { key: "exact",       label: "Placar Exato",       pts: 5, color: colors.green },
-          { key: "winnerScore", label: "Placar Vencedor",    pts: 3, color: colors.primary },
-          { key: "goalDiff",    label: "Diferença de Gols",  pts: 2, color: colors.teal },
-          { key: "loserScore",  label: "Placar Perdedor",    pts: 1, color: colors.purple },
-          { key: "rout",        label: "Goleada (extra)",    pts: 1, color: colors.orange },
-        ].map((b) => (
-          <View key={b.key} style={styles.bonusRow}>
-            <View style={[styles.dot, { backgroundColor: b.color }]} />
-            <Text style={styles.bonusLabel}>{b.label}</Text>
-            <Text style={[styles.bonusPts, { color: b.color }]}>+{b.pts} pts</Text>
-          </View>
-        ))}
-      </View>
-
-      <Text style={styles.potential}>
-        Potencial: até <Text style={styles.potentialValue}>{preview} pts</Text>
-      </Text>
-
-      <TouchableOpacity
-        style={[styles.btn, saveMutation.isPending && styles.btnDisabled]}
-        onPress={() => saveMutation.mutate()}
-        disabled={saveMutation.isPending}
-      >
-        {saveMutation.isPending
-          ? <ActivityIndicator color="#fff" />
-          : <Text style={styles.btnText}>Salvar palpite</Text>}
-      </TouchableOpacity>
-    </ScrollView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: colors.bg },
-  msg: { color: colors.textMuted, fontSize: 15 },
-  container: { padding: 20, gap: 16, backgroundColor: colors.bg, flexGrow: 1 },
-  subtitle: { color: colors.textMuted, textAlign: "center", fontSize: 13 },
-  inputCard: {
-    backgroundColor: colors.card, borderRadius: 14, padding: 20,
-    borderWidth: 1, borderColor: colors.cardBorder,
+  center: { alignItems: "center", justifyContent: "center", padding: spacing.xl },
+  container: { padding: spacing.xl, gap: spacing.md },
+  pickCard: { gap: spacing.lg, alignItems: "center" },
+  steppers: { flexDirection: "row", alignItems: "flex-start", justifyContent: "center", gap: spacing.md, width: "100%" },
+  potential: {
+    alignItems: "center", backgroundColor: palette.primaryGlow,
+    paddingVertical: spacing.md, paddingHorizontal: spacing.xxl, borderRadius: radius.lg,
+    width: "100%",
   },
-  previewCard: {
-    backgroundColor: colors.card, borderRadius: 14, padding: 16,
-    borderWidth: 1, borderColor: colors.cardBorder, gap: 8,
+  potentialValue: { fontFamily: "Inter_800ExtraBold", fontSize: 30, color: palette.primary },
+  footer: {
+    position: "absolute", left: 0, right: 0, bottom: 0,
+    paddingHorizontal: spacing.xl, paddingTop: spacing.md,
+    backgroundColor: palette.bg, borderTopWidth: 1, borderTopColor: palette.border,
   },
-  previewTitle: { color: colors.text, fontSize: 16, fontWeight: "bold" },
-  previewSub: { color: colors.textMuted, fontSize: 13 },
-  divider: { height: 1, backgroundColor: colors.divider },
-  previewBonus: { color: colors.textMuted, fontSize: 12 },
-  bonusRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  bonusLabel: { color: colors.text, flex: 1, fontSize: 14 },
-  bonusPts: { fontWeight: "bold", fontSize: 14 },
-  potential: { color: colors.textMuted, textAlign: "center", fontSize: 14 },
-  potentialValue: { color: colors.green, fontWeight: "bold" },
-  btn: {
-    backgroundColor: colors.primary, borderRadius: 12,
-    padding: 16, alignItems: "center", marginTop: 4,
-  },
-  btnDisabled: { opacity: 0.6 },
-  btnText: { color: "#fff", fontWeight: "bold", fontSize: 16 },
 });
