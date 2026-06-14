@@ -90,6 +90,51 @@ export function matchTournamentPhase(round: string | undefined): MatchTournament
 }
 
 /* ------------------------------------------------------------------ */
+/* Etapas POR CONTAGEM DE JOGOS (modelo adotado, decidido com o usuário) */
+/* ------------------------------------------------------------------ */
+
+/**
+ * As etapas do mata-mata são definidas pela POSIÇÃO do jogo na lista de todos os
+ * jogos da competição ordenada por kickoff (não pelos rótulos da Copa). Para a
+ * Copa 2026 (104 jogos): Etapa 1 = jogos 1–8 (Seeds); Etapa 2 = 9–36 (Fase de
+ * Grupos); Etapa 3 = 37–72 (Eliminatória + Repescagem em paralelo); Etapa 4 =
+ * 73–104 (Grande Final, corrida de pontos). 8+28+36 = 72 (fase de grupos da
+ * Copa) e os 32 restantes (mata-mata da Copa) formam a Grande Final.
+ *
+ * `STAGE_BOUNDARIES` são os limiares CUMULATIVOS entre as etapas.
+ */
+export const STAGE_BOUNDARIES = [8, 36, 72] as const;
+
+export type TournamentStage = 1 | 2 | 3 | 4;
+
+/** Etapa de um jogo pela sua posição (índice 0-based) na lista ordenada por kickoff. */
+export function stageOfIndex(index: number): TournamentStage {
+  if (index < STAGE_BOUNDARIES[0]) return 1;
+  if (index < STAGE_BOUNDARIES[1]) return 2;
+  if (index < STAGE_BOUNDARIES[2]) return 3;
+  return 4;
+}
+
+/** Mapeia a etapa (1–4) para a fase persistida em `TournamentState.phase`. */
+export function phaseOfStage(stage: TournamentStage): TournamentPhase {
+  return stage === 1 ? "qualifier" : stage === 2 ? "groups" : stage === 3 ? "knockout" : "final";
+}
+
+/**
+ * Agrupa os jogos por etapa, ORDENANDO por kickoff (asc) primeiro. Retorna, para
+ * cada etapa, os IDs na ordem de kickoff (a ordem importa para fatiar a Etapa 3
+ * em rodadas). Robusto a sync incompleto: simplesmente classifica o que existe.
+ */
+export function stageMatchIds(
+  matches: { id: string; kickoffMs: number }[]
+): Record<TournamentStage, string[]> {
+  const ordered = [...matches].sort((a, b) => a.kickoffMs - b.kickoffMs);
+  const out: Record<TournamentStage, string[]> = { 1: [], 2: [], 3: [], 4: [] };
+  ordered.forEach((m, i) => out[stageOfIndex(i)].push(m.id));
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
 /* 1. Qualificatória — Seeds                                           */
 /* ------------------------------------------------------------------ */
 
@@ -266,6 +311,25 @@ export function triploCount(M: number): number {
     if (isPowerOfTwo((M + t) / 2)) return t;
   }
   return M % 2;
+}
+
+/**
+ * Quantas rodadas a chave principal leva para reduzir de `M` participantes até
+ * `≤ target` sobreviventes. Depende só da ESTRUTURA dos confrontos (cada Duelo
+ * deixa 1, cada Triplo deixa 2), não dos pontos — por isso é determinístico e
+ * pode ser pré-calculado para fatiar a Etapa 3 em rodadas. Usado com um teto.
+ */
+export function bracketRoundsToTarget(M: number, target: number): number {
+  let n = M;
+  let rounds = 0;
+  while (n > target && rounds < 100) {
+    const t = triploCount(n);
+    const next = t * 2 + Math.floor((n - 3 * t) / 2);
+    if (next >= n || next < 1) break; // segurança contra estagnação
+    n = next;
+    rounds++;
+  }
+  return rounds;
 }
 
 function serpentine<T>(ordered: T[], numGroups: number): T[][] {
@@ -494,10 +558,15 @@ export interface TournamentState {
   /** true quando a Repescagem terminou (sobrou ≤ 1 e a chave principal acabou). */
   repechageComplete?: boolean;
   /**
-   * Nº de rodadas de mata-mata da Copa já processadas (avança chave principal e
-   * repescagem juntas, 1 por rodada da Copa). Garante idempotência do gatilho.
+   * Nº de rodadas da Etapa 3 (Eliminatória) já processadas. A Etapa 3 avança a
+   * chave principal e a repescagem juntas, 1 rodada por fatia de jogos (por
+   * kickoff). Garante idempotência do gatilho.
    */
   cupRoundsDone?: number;
+  /** Total de rodadas planejadas para a Etapa 3 (fatiamento dos 36 jogos). */
+  knockoutRounds?: number;
+  /** Finalistas da Grande Final (sobreviventes da chave + sobrevivente da repescagem). */
+  finalists?: QualifiedParticipant[];
   /** Campeão do bolão (definido ao fim da Grande Final). */
   champion?: QualifiedParticipant | null;
   /** Vice-campeão do bolão. */

@@ -18,13 +18,7 @@ import { logger } from "firebase-functions/v2";
 import { fetchWorldCupEvents } from "./sportsDb";
 import { scoreMatch } from "./scoreMatch";
 import { sendBetReminders } from "./reminders";
-import {
-  progressQualifierAllGroups,
-  progressGroupsToKnockoutAllGroups,
-  progressKnockoutAllGroups,
-  progressFinalAllGroups,
-} from "./tournament";
-import { matchTournamentPhase } from "@bolao/scoring";
+import { progressTournamentAllGroups } from "./tournament";
 import type { MatchDoc } from "./types";
 
 initializeApp();
@@ -136,23 +130,15 @@ export const onMatchWrite = onDocumentWritten("matches/{matchId}", async (event)
   if (!becameFinished) return;
   await scoreMatch(event.params.matchId);
 
-  // Avança o torneio quando a fase correspondente termina (só conclui quando
-  // TODOS os jogos daquela fase estiverem encerrados).
-  const phase = matchTournamentPhase(after.round);
-  if (phase === "qualifier") await progressQualifierAllGroups();
-  else if (phase === "groups") await progressGroupsToKnockoutAllGroups();
-  else if (phase === "knockout") await progressKnockoutAllGroups();
-  else if (phase === "final") await progressFinalAllGroups();
+  // Avança o mata-mata: o driver decide a etapa de cada jogo pela posição na
+  // lista ordenada por kickoff e só conclui quando TODA a fatia terminou.
+  await progressTournamentAllGroups();
 });
 
 /** Avança o torneio sob demanda (apenas admin) — útil para testes. */
 export const progressTournamentNow = onCall(async (req) => {
   await assertAdmin(req.auth?.uid);
-  const qualifier = await progressQualifierAllGroups();
-  const toKnockout = await progressGroupsToKnockoutAllGroups();
-  const knockoutRounds = await progressKnockoutAllGroups();
-  const grandFinal = await progressFinalAllGroups();
-  return { qualifier, toKnockout, knockoutRounds, grandFinal };
+  return progressTournamentAllGroups();
 });
 
 /** Entrar em um grupo via código de convite. */

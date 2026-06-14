@@ -19,50 +19,43 @@ const PHASES: Phase[] = [
   {
     icon: "flag-outline",
     name: "1 · Qualificatória",
-    summary: "Define o Seed de cada participante.",
+    summary: "8 jogos · define os Seeds.",
     rules: [
-      "Todos palpitam nos jogos iniciais do torneio.",
+      "Todos palpitam nos 8 primeiros jogos da Copa.",
       "Os pontos acumulados viram o Seed (peso) de cada um.",
-      "Os maiores Seeds tornam-se cabeças de chave.",
+      "Os 2 maiores Seeds são cabeças de chave (não se enfrentam cedo).",
     ],
   },
   {
     icon: "grid-outline",
     name: "2 · Fase de Grupos",
-    summary: "Divisões de 4 por distribuição em serpentina.",
+    summary: "28 jogos · divisões de 4 (serpentina).",
     rules: [
       "Cabeças de chave ficam em grupos distintos (serpentina).",
       "Todos competem entre si dentro do grupo.",
       "Classificam todos, menos o último de cada grupo.",
-      "A lanterna vai direto para a Repescagem.",
+      "A lanterna vai para a Repescagem.",
     ],
   },
   {
     icon: "git-network-outline",
-    name: "3 · Eliminatórias",
-    summary: "Chave principal: Triplos e Duelos.",
+    name: "3 · Eliminatória + Repescagem",
+    summary: "36 jogos · chave e repescagem em paralelo.",
     rules: [
-      "Davi x Golias: primeiros enfrentam últimos de outros grupos.",
-      "Reencontro adiado: nada de rival do mesmo grupo na 1ª rodada.",
-      "Difficulty Score prioriza confrontos Triplos.",
+      "Chave: Triplos e Duelos (Davi x Golias, Reencontro Adiado).",
       "Triplo: 3 jogam, 2 avançam. Duelo: 1x1, vencedor avança.",
-    ],
-  },
-  {
-    icon: "refresh-outline",
-    name: "4 · Repescagem",
-    summary: "Segunda chance para lanternas e eliminados em duelos.",
-    rules: [
-      "Novos grupos, todos contra todos.",
-      "Metade avança, metade é eliminada.",
-      "Repete até sobrar 1, que vai à Grande Final.",
+      "Eliminados caem na Repescagem (corre em paralelo).",
+      "Repescagem reduz metade a cada rodada até sobrar 1.",
     ],
   },
   {
     icon: "trophy-outline",
-    name: "5 · Grande Final",
-    summary: "Sobreviventes da chave + remanescente da repescagem.",
-    rules: ["Pontos zerados.", "Melhor desempenho nos jogos finais vence o torneio."],
+    name: "4 · Grande Final",
+    summary: "32 jogos · corrida de pontos entre os finalistas.",
+    rules: [
+      "Finalistas: sobreviventes da chave + sobrevivente da repescagem.",
+      "Quem somar mais pontos nos 32 jogos finais é o campeão.",
+    ],
   },
 ];
 
@@ -104,11 +97,8 @@ export default function MataMataScreen() {
 function LiveTournament({ state }: { state: TournamentState }) {
   const {
     phase, seeds = [], groups, knockout, repechage,
-    mainBracketWinner, repechageWinner, champion, runnerUp,
+    finalists = [], repechageWinner, champion, runnerUp,
   } = state;
-  const finalists = [mainBracketWinner, repechageWinner].filter(Boolean) as NonNullable<
-    typeof mainBracketWinner
-  >[];
   return (
     <>
       <View style={styles.phaseChip}>
@@ -133,16 +123,16 @@ function LiveTournament({ state }: { state: TournamentState }) {
 
       {(phase === "final" || phase === "done") && finalists.length > 0 && !champion && (
         <View style={{ gap: spacing.sm }}>
-          <Text variant="label" color={palette.textMuted}>Grande Final</Text>
+          <Text variant="label" color={palette.textMuted}>
+            Grande Final · {finalists.length} finalistas (corrida de pontos)
+          </Text>
           <Card style={{ gap: spacing.sm }}>
-            {finalists.map((p, i) => (
-              <View key={p.uid}>
-                {i > 0 && (
-                  <Text variant="caption" color={palette.textFaint} style={styles.vs}>vs</Text>
-                )}
-                <View style={styles.memberRow}>
+            {finalists.map((p) => {
+              const fromRepechage = p.uid === repechageWinner?.uid;
+              return (
+                <View key={p.uid} style={styles.memberRow}>
                   <Ionicons
-                    name={i === 0 ? "git-network-outline" : "refresh-outline"}
+                    name={fromRepechage ? "refresh-outline" : "git-network-outline"}
                     size={18}
                     color={palette.primary}
                   />
@@ -151,16 +141,16 @@ function LiveTournament({ state }: { state: TournamentState }) {
                     {p.displayName ?? "Participante"}
                   </Text>
                   <Text variant="caption" color={palette.textFaint}>
-                    {i === 0 ? "Chave principal" : "Repescagem"}
+                    {fromRepechage ? "Repescagem" : "Chave"}
                   </Text>
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </Card>
         </View>
       )}
 
-      {repechageWinner && phase !== "done" && (
+      {repechageWinner && phase === "knockout" && (
         <Card style={styles.winnerCard}>
           <Ionicons name="refresh-circle" size={22} color={palette.cyan} />
           <View style={{ flex: 1 }}>
@@ -171,21 +161,10 @@ function LiveTournament({ state }: { state: TournamentState }) {
         </Card>
       )}
 
-      {mainBracketWinner && (
-        <Card style={styles.winnerCard}>
-          <Ionicons name="trophy" size={22} color={palette.gold} />
-          <View style={{ flex: 1 }}>
-            <Text variant="caption" color={palette.textMuted}>Vencedor da chave principal</Text>
-            <Text variant="subtitle" numberOfLines={1}>{mainBracketWinner.displayName ?? "Participante"}</Text>
-            <Text variant="caption" color={palette.textFaint}>Classificado para a Grande Final</Text>
-          </View>
-        </Card>
-      )}
-
       {knockout && knockout.matchups.length > 0 && (
         <View style={{ gap: spacing.md }}>
           <Text variant="label" color={palette.textMuted}>
-            Eliminatórias · {knockout.round}ª rodada
+            Eliminatória · {knockout.round}ª rodada
           </Text>
           {knockout.matchups.map((m, i) => (
             <MatchupCard key={i} matchup={m} />
