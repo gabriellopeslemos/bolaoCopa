@@ -1,16 +1,1 @@
-{
-  "compilerOptions": {
-    "target": "ES2020",
-    "module": "CommonJS",
-    "moduleResolution": "node",
-    "declaration": true,
-    "outDir": "dist",
-    "rootDir": "src",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
-  },
-  "include": ["src"],
-  "exclude": ["dist", "node_modules", "src/**/*.test.ts"]
-}
+{"compilerOptions":{"target":"ES2020","module":"CommonJS","moduleResolution":"node10","declaration":true,"outDir":"dist","rootDir":"src","strict":true,"esModuleInterop":true,"skipLibCheck":true,"forceConsistentCasingInFileNames":true},"include":["src"],"exclude":["dist","node_modules","src/**/*.test.ts"]}
