@@ -8,13 +8,35 @@
  */
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import {
-  calculatePoints, DEFAULT_SCORING_CONFIG, Score, ScoringConfig, matchTournamentPhase,
+  calculatePoints, DEFAULT_SCORING_CONFIG, Score, ScoringConfig,
+  stageOfIndex, phaseOfStage,
 } from "@bolao/scoring";
 import { logger } from "firebase-functions/v2";
 import type { GroupDoc, MatchDoc } from "./types";
 
 function resolveConfig(group?: Partial<GroupDoc>): ScoringConfig {
   return { ...DEFAULT_SCORING_CONFIG, ...(group?.scoringConfig ?? {}) };
+}
+
+function kickoffMs(m: Pick<MatchDoc, "kickoff">): number {
+  const k = m.kickoff as FirebaseFirestore.Timestamp | undefined;
+  return k?.toMillis?.() ?? 0;
+}
+
+/**
+ * Etapa (fase) do mata-mata que um jogo alimenta, pela sua POSIÇÃO na lista de
+ * todos os jogos ordenada por kickoff (modelo por contagem: 8/28/36/32).
+ */
+async function phaseOfMatch(
+  db: FirebaseFirestore.Firestore,
+  matchId: string
+): Promise<ReturnType<typeof phaseOfStage>> {
+  const snap = await db.collection("matches").get();
+  const ordered = snap.docs
+    .map((d) => ({ id: d.id, kickoffMs: kickoffMs(d.data() as MatchDoc) }))
+    .sort((a, b) => a.kickoffMs - b.kickoffMs);
+  const index = ordered.findIndex((m) => m.id === matchId);
+  return phaseOfStage(stageOfIndex(index < 0 ? 0 : index));
 }
 
 export async function scoreMatch(matchId: string): Promise<{ updated: number }> {
@@ -32,9 +54,10 @@ export async function scoreMatch(matchId: string): Promise<{ updated: number }> 
     return { updated: 0 };
   }
   const result: Score = match.score;
-  // Fase do mata-mata que este jogo alimenta — usada para o bucket de pontos
-  // por fase (os pontos "zeram" a cada fase pois cada fase tem seu próprio bucket).
-  const matchPhase = matchTournamentPhase(match.round);
+  // Fase do mata-mata que este jogo alimenta — bucket de pontos por etapa
+  // (contagem de jogos por kickoff). O ranking GERAL usa `totalPoints`; este
+  // bucket por fase é registro interno do mata-mata.
+  const matchPhase = await phaseOfMatch(db, matchId);
 
   // Todos os palpites desta partida (em qualquer grupo).
   const betsSnap = await db

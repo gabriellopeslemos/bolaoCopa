@@ -13,6 +13,11 @@ import {
   resolveKnockoutRound,
   resolveRepechageRound,
   resolveFinal,
+  stageOfIndex,
+  phaseOfStage,
+  stageMatchIds,
+  bracketRoundsToTarget,
+  STAGE_BOUNDARIES,
   type SeedInput,
   type DrawGroup,
   type QualifiedParticipant,
@@ -300,6 +305,67 @@ describe("resolveKnockoutRound", () => {
     const r2 = drawKnockoutRound(res.survivors, 2);
     expect(r2.round).toBe(2);
     expect(r2.matchups.flatMap((m) => m.players).length).toBe(4);
+  });
+});
+
+describe("stageOfIndex (etapas por contagem de jogos)", () => {
+  it("respeita os limiares 8 / 36 / 72", () => {
+    expect(STAGE_BOUNDARIES).toEqual([8, 36, 72]);
+    expect(stageOfIndex(0)).toBe(1);
+    expect(stageOfIndex(7)).toBe(1);
+    expect(stageOfIndex(8)).toBe(2); // 9º jogo
+    expect(stageOfIndex(35)).toBe(2); // 36º jogo
+    expect(stageOfIndex(36)).toBe(3); // 37º jogo
+    expect(stageOfIndex(71)).toBe(3); // 72º jogo
+    expect(stageOfIndex(72)).toBe(4); // 73º jogo
+    expect(stageOfIndex(103)).toBe(4); // 104º jogo
+  });
+
+  it("Copa 2026: 8 / 28 / 36 / 32 jogos por etapa", () => {
+    const counts = { 1: 0, 2: 0, 3: 0, 4: 0 };
+    for (let i = 0; i < 104; i++) counts[stageOfIndex(i)]++;
+    expect(counts).toEqual({ 1: 8, 2: 28, 3: 36, 4: 32 });
+  });
+});
+
+describe("phaseOfStage", () => {
+  it("mapeia etapa → fase persistida", () => {
+    expect(phaseOfStage(1)).toBe("qualifier");
+    expect(phaseOfStage(2)).toBe("groups");
+    expect(phaseOfStage(3)).toBe("knockout");
+    expect(phaseOfStage(4)).toBe("final");
+  });
+});
+
+describe("stageMatchIds", () => {
+  it("ordena por kickoff e agrupa por etapa", () => {
+    // 10 jogos fora de ordem; só checa que ordena e respeita o limiar 8.
+    const matches = Array.from({ length: 10 }, (_, i) => ({
+      id: `m${i}`,
+      kickoffMs: (10 - i) * 1000, // ordem invertida
+    }));
+    const ids = stageMatchIds(matches);
+    expect(ids[1]).toEqual(["m9", "m8", "m7", "m6", "m5", "m4", "m3", "m2"]); // 8 primeiros (kickoff asc)
+    expect(ids[2]).toEqual(["m1", "m0"]);
+    expect(ids[3]).toEqual([]);
+  });
+
+  it("sync incompleto: classifica o que existir", () => {
+    const ids = stageMatchIds([{ id: "a", kickoffMs: 5 }, { id: "b", kickoffMs: 1 }]);
+    expect(ids[1]).toEqual(["b", "a"]);
+  });
+});
+
+describe("bracketRoundsToTarget", () => {
+  it("conta rodadas até ≤ target", () => {
+    expect(bracketRoundsToTarget(4, 4)).toBe(0); // já no alvo
+    expect(bracketRoundsToTarget(8, 4)).toBe(1); // 8 → 4
+    expect(bracketRoundsToTarget(16, 4)).toBe(2); // 16 → 8 → 4
+    expect(bracketRoundsToTarget(6, 4)).toBe(1); // 6 → 4 (2 triplos)
+  });
+  it("não estagna com entradas pequenas", () => {
+    expect(bracketRoundsToTarget(1, 4)).toBe(0);
+    expect(bracketRoundsToTarget(2, 1)).toBe(1);
   });
 });
 

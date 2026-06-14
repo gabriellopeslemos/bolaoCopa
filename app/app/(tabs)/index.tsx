@@ -6,13 +6,13 @@ import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/hooks/useAuth";
 import { useActiveGroup } from "@/hooks/useActiveGroup";
-import { useGroup, useMembers, useTournament } from "@/lib/data";
+import { useGroup, useMembers } from "@/lib/data";
 import {
   Screen, Text, Card, Avatar, EmptyState, SkeletonCard, FadeIn, Button,
 } from "@/components/ui";
 import { ScoringRulesCard } from "@/components/ScoringRulesCard";
 import { palette, spacing, radius } from "@/lib/theme";
-import type { Member, TournamentPhase } from "@/lib/types";
+import type { Member } from "@/lib/types";
 
 const DIVISION_SIZE = 4;
 
@@ -36,7 +36,6 @@ export default function RankingScreen() {
 
   const group = useGroup(activeGroupId);
   const members = useMembers(activeGroupId);
-  const tournament = useTournament(activeGroupId);
 
   async function shareInvite() {
     if (!group.data) return;
@@ -63,32 +62,18 @@ export default function RankingScreen() {
     );
   }
 
-  // Pontos da FASE ATUAL (os pontos zeram a cada fase → cada fase tem seu bucket).
-  const currentPhase: TournamentPhase = tournament.data?.phase ?? "qualifier";
-  const pointsOf = (m: Member) => m.phasePoints?.[currentPhase] ?? 0;
-
+  // RANKING GERAL: competição separada do mata-mata. Soma CUMULATIVA de todos os
+  // jogos (todo mundo continua pontuando até o fim); quem soma mais vence.
+  const pointsOf = (m: Member) => m.totalPoints ?? 0;
   const ranked = [...(members.data ?? [])].sort((a, b) => pointsOf(b) - pointsOf(a));
-
-  // Se o torneio já sorteou os grupos (serpentina), usa-os como divisões reais;
-  // senão, particiona o ranking por pontos (fallback antes da Qualificatória).
-  const drawn = tournament.data?.groups;
-  const memberById = new Map(ranked.map((m) => [m.id, m]));
-  const sections = drawn && drawn.length
-    ? drawn.map((g) => ({
-        title: `Grupo ${g.id}`,
-        data: g.members
-          .map((s) => memberById.get(s.uid))
-          .filter((m): m is Member => !!m)
-          .sort((a, b) => pointsOf(b) - pointsOf(a)),
-      }))
-    : toDivisions(ranked);
+  const sections = toDivisions(ranked);
 
   return (
     <Screen edges={{ top: true }}>
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
           <Text variant="caption" color={palette.textMuted}>
-            {drawn?.length ? "Ranking · grupos sorteados" : "Ranking · fase de grupos"}
+            Ranking geral · todos os jogos
           </Text>
           <Text variant="title" numberOfLines={1}>{activeGroup?.name ?? group.data?.name ?? " "}</Text>
         </View>

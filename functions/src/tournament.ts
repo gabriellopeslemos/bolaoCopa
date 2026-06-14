@@ -1,14 +1,20 @@
 /**
- * Avanço do mata-mata — FATIA 1: Qualificatória → Fase de Grupos.
+ * Avanço do mata-mata — MODELO POR CONTAGEM DE JOGOS.
  *
- * Quando TODOS os jogos da Qualificatória (1ª rodada da fase de grupos)
- * terminam, calcula os Seeds de cada grupo (a partir dos pontos dos palpites
- * naqueles jogos) e sorteia os grupos por serpentina, persistindo em
- * `groups/{groupId}/tournament/state`. Idempotente: só roda enquanto o grupo
- * ainda está na fase "qualifier".
+ * As etapas são definidas pela POSIÇÃO do jogo na lista de todos os jogos da
+ * competição ordenada por kickoff (Copa 2026, 104 jogos):
+ *   - Etapa 1 (jogos 1–8)   → Qualificatória (Seeds + serpentina).
+ *   - Etapa 2 (9–36)        → Fase de Grupos (último de cada grupo → repescagem).
+ *   - Etapa 3 (37–72)       → Eliminatória (chave) + Repescagem EM PARALELO.
+ *   - Etapa 4 (73–104)      → Grande Final (corrida de pontos → 1 campeão).
+ *
+ * Tudo é dirigido por `progressTournamentAllGroups`, idempotente: o estado em
+ * `groups/{groupId}/tournament/state` só avança quando TODOS os jogos da fatia
+ * correspondente terminam. Os pontos de cada etapa vêm dos palpites nos jogos
+ * daquela etapa (lidos direto de `bets`).
  */
 import { getFirestore } from "firebase-admin/firestore";
-import type { Firestore } from "firebase-admin/firestore";
+import type { Firestore, DocumentReference } from "firebase-admin/firestore";
 import { logger } from "firebase-functions/v2";
 import {
   computeSeeds,
@@ -19,60 +25,131 @@ import {
   resolveKnockoutRound,
   resolveRepechageRound,
   resolveFinal,
-  cupRoundOf,
-  matchTournamentPhase,
+  bracketRoundsToTarget,
+  stageMatchIds,
   type SeedInput,
   type TournamentState,
   type QualifiedParticipant,
 } from "@bolao/scoring";
 import type { MatchDoc, BetDoc } from "./types";
 
-/** Avança a Qualificatória → Fase de Grupos de todos os grupos, se já completa. */
-export async function progressQualifierAllGroups(): Promise<{ advanced: number }> {
-  const db = getFirestore();
+/**
+ * Quantos sobreviventes da chave principal entram na Grande Final (default
+ * razoável, ajustável). Mantém "finalistas" no plural em vez de reduzir a 1.
+ */
+const FINALISTS_TARGET = 4;
+/** Tamanho dos grupos na Fase de Grupos. */
+const GROUP_SIZE = 4;
 
-  const matchesSnap = await db.collection("matches").get();
-  const qualifiers = matchesSnap.docs.filter(
-    (d) => matchTournamentPhase((d.data() as MatchDoc).round) === "qualifier"
-  );
-  // Sem jogos de Qualificatória ou ainda há jogos por terminar: não avança.
-  if (qualifiers.length === 0) return { advanced: 0 };
-  if (!qualifiers.every((d) => (d.data() as MatchDoc).status === "finished")) {
-    return { advanced: 0 };
+function kickoffMs(m: MatchDoc): number {
+  const k = m.kickoff as FirebaseFirestore.Timestamp | undefined;
+  return k?.toMillis?.() ?? 0;
+}
+
+interface StageInfo {
+  /** IDs dos jogos de cada etapa, em ordem de kickoff. */
+  byStage: Record<1 | 2 | 3 | 4, string[]>;
+  /** IDs dos jogos já finalizados. */
+  finished: Set<string>;
+}
+
+/** Lê `matches` e separa os IDs por etapa (ordenados por kickoff). */
+async function loadStages(db: Firestore): Promise<StageInfo> {
+  const snap = await db.collection("matches").get();
+  const all = snap.docs.map((d) => {
+    const m = d.data() as MatchDoc;
+    return { id: d.id, kickoffMs: kickoffMs(m), finished: m.status === "finished" };
+  });
+  return {
+    byStage: stageMatchIds(all.map((m) => ({ id: m.id, kickoffMs: m.kickoffMs }))),
+    finished: new Set(all.filter((m) => m.finished).map((m) => m.id)),
+  };
+}
+
+const allFinished = (ids: string[], finished: Set<string>) =>
+  ids.length > 0 && ids.every((id) => finished.has(id));
+
+/** Soma os pontos dos palpites de cada usuário restritos a um conjunto de jogos. */
+async function pointsForMatches(
+  db: Firestore,
+  groupId: string,
+  ids: Set<string>
+): Promise<Record<string, number>> {
+  const betsSnap = await db.collection(`groups/${groupId}/bets`).get();
+  const points: Record<string, number> = {};
+  for (const betDoc of betsSnap.docs) {
+    const b = betDoc.data() as BetDoc;
+    if (ids.has(b.matchId)) points[b.userId] = (points[b.userId] ?? 0) + (b.points ?? 0);
   }
+  return points;
+}
 
-  const qualifierIds = new Set(qualifiers.map((d) => d.id));
+/* ------------------------------------------------------------------ */
+/* Driver                                                              */
+/* ------------------------------------------------------------------ */
+
+/** Avança o mata-mata de todos os grupos o quanto for possível. */
+export async function progressTournamentAllGroups(): Promise<{ advanced: number }> {
+  const db = getFirestore();
+  const stages = await loadStages(db);
   const groupsSnap = await db.collection("groups").get();
 
   let advanced = 0;
   for (const groupDoc of groupsSnap.docs) {
-    if (await seedAndDrawGroup(db, groupDoc.id, qualifierIds)) advanced++;
+    let any = false;
+    // Um único jogo pode destravar várias etapas; avança até não mudar mais.
+    while (await advanceGroupOnce(db, groupDoc.id, stages)) any = true;
+    if (any) advanced++;
   }
   return { advanced };
 }
 
-/** Semeia e sorteia os grupos de um bolão. Retorna true se avançou de fato. */
-async function seedAndDrawGroup(
+async function advanceGroupOnce(db: Firestore, groupId: string, stages: StageInfo): Promise<boolean> {
+  const stateRef = db.doc(`groups/${groupId}/tournament/state`);
+  const state = ((await stateRef.get()).data() as TournamentState | undefined) ?? { phase: "qualifier" };
+
+  switch (state.phase ?? "qualifier") {
+    case "qualifier":
+      return stage1Seeds(db, groupId, state, stages, stateRef);
+    case "groups":
+      return stage2Knockout(db, groupId, state, stages, stateRef);
+    case "knockout":
+      return stage3Round(db, groupId, state, stages, stateRef);
+    case "repechage": // segurança: tratado dentro da Etapa 3
+      return stage3Round(db, groupId, state, stages, stateRef);
+    case "final":
+      return stage4Final(db, groupId, state, stages, stateRef);
+    default:
+      return false; // "done"
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Etapa 1 — Seeds + serpentina                                        */
+/* ------------------------------------------------------------------ */
+
+async function stage1Seeds(
   db: Firestore,
   groupId: string,
-  qualifierIds: Set<string>
+  state: TournamentState,
+  stages: StageInfo,
+  stateRef: DocumentReference
 ): Promise<boolean> {
-  const stateRef = db.doc(`groups/${groupId}/tournament/state`);
-  const state = (await stateRef.get()).data() as TournamentState | undefined;
-  const phase = state?.phase ?? "qualifier";
-  if (phase !== "qualifier") return false; // já avançou
+  const ids = stages.byStage[1];
+  if (!allFinished(ids, stages.finished)) return false;
 
+  const idSet = new Set(ids);
   const [membersSnap, betsSnap] = await Promise.all([
     db.collection(`groups/${groupId}/members`).get(),
     db.collection(`groups/${groupId}/bets`).get(),
   ]);
   if (membersSnap.empty) return false;
 
-  // Pontos da Qualificatória por membro (somando os palpites nos jogos da 1ª rodada).
+  // Pontos + placares exatos da Etapa 1 por membro (desempate dos seeds).
   const agg = new Map<string, { points: number; exact: number }>();
   for (const betDoc of betsSnap.docs) {
     const b = betDoc.data() as BetDoc;
-    if (!qualifierIds.has(b.matchId)) continue;
+    if (!idSet.has(b.matchId)) continue;
     const cur = agg.get(b.userId) ?? { points: 0, exact: 0 };
     cur.points += b.points ?? 0;
     if (b.breakdown?.exact) cur.exact += 1;
@@ -90,284 +167,224 @@ async function seedAndDrawGroup(
   });
 
   const seeds = computeSeeds(participants);
-  const groups = snakeDraw(seeds, 4);
-
-  const next: TournamentState = {
-    phase: "groups",
-    seeds,
-    groups,
-    updatedAt: Date.now(),
-  };
+  const groups = snakeDraw(seeds, GROUP_SIZE);
+  const next: TournamentState = { ...state, phase: "groups", seeds, groups, updatedAt: Date.now() };
   await stateRef.set(next);
-
-  logger.info(
-    `tournament[${groupId}]: Qualificatória → Grupos (${seeds.length} seeds, ${groups.length} grupos)`
-  );
+  logger.info(`tournament[${groupId}]: Etapa 1 → Fase de Grupos (${seeds.length} seeds, ${groups.length} grupos)`);
   return true;
 }
 
 /* ------------------------------------------------------------------ */
-/* Fatia 2: Fase de Grupos → Eliminatórias                             */
+/* Etapa 2 — Fase de Grupos → monta a chave e o pool de repescagem     */
 /* ------------------------------------------------------------------ */
 
-/** Avança a Fase de Grupos → Eliminatórias de todos os grupos, se já completa. */
-export async function progressGroupsToKnockoutAllGroups(): Promise<{ advanced: number }> {
-  const db = getFirestore();
-
-  const matchesSnap = await db.collection("matches").get();
-  const groupMatches = matchesSnap.docs.filter(
-    (d) => matchTournamentPhase((d.data() as MatchDoc).round) === "groups"
-  );
-  if (groupMatches.length === 0) return { advanced: 0 };
-  if (!groupMatches.every((d) => (d.data() as MatchDoc).status === "finished")) {
-    return { advanced: 0 };
-  }
-
-  const groupMatchIds = new Set(groupMatches.map((d) => d.id));
-  const groupsSnap = await db.collection("groups").get();
-
-  let advanced = 0;
-  for (const groupDoc of groupsSnap.docs) {
-    if (await buildKnockoutForGroup(db, groupDoc.id, groupMatchIds)) advanced++;
-  }
-  return { advanced };
-}
-
-/** Classifica e sorteia a 1ª rodada das Eliminatórias de um bolão. */
-async function buildKnockoutForGroup(
+async function stage2Knockout(
   db: Firestore,
   groupId: string,
-  groupMatchIds: Set<string>
+  state: TournamentState,
+  stages: StageInfo,
+  stateRef: DocumentReference
 ): Promise<boolean> {
-  const stateRef = db.doc(`groups/${groupId}/tournament/state`);
-  const state = (await stateRef.get()).data() as TournamentState | undefined;
-  if (state?.phase !== "groups" || !state.groups?.length) return false;
+  const ids = stages.byStage[2];
+  if (!allFinished(ids, stages.finished)) return false;
+  if (!state.groups?.length) return false;
 
-  // Pontos da Fase de Grupos por membro (palpites nos jogos dessa fase).
-  const betsSnap = await db.collection(`groups/${groupId}/bets`).get();
-  const points: Record<string, number> = {};
-  for (const betDoc of betsSnap.docs) {
-    const b = betDoc.data() as BetDoc;
-    if (!groupMatchIds.has(b.matchId)) continue;
-    points[b.userId] = (points[b.userId] ?? 0) + (b.points ?? 0);
-  }
-
+  const points = await pointsForMatches(db, groupId, new Set(ids));
   const { qualified, repechage } = classifyAfterGroups(state.groups, points);
-  const knockout = drawKnockoutRound1(qualified);
+
+  // Se já estamos no alvo (poucos classificados), a chave já está "pronta":
+  // todos os classificados são finalistas (nenhuma rodada de eliminação a fazer).
+  const mainAtTarget = qualified.length <= FINALISTS_TARGET;
+  const knockout = mainAtTarget
+    ? { round: 1, matchups: [], complete: true }
+    : drawKnockoutRound1(qualified);
+
+  // Nº de rodadas da Etapa 3: o suficiente para a chave atingir o alvo E para a
+  // repescagem reduzir até 1 (fatia os 36 jogos em rodadas iguais). O pool da
+  // repescagem cresce com os eliminados da chave (≈ qualified - alvo), por isso o
+  // dimensionamento considera o total potencial + 1 rodada de folga.
+  const maxPool = repechage.length + Math.max(0, qualified.length - FINALISTS_TARGET);
+  const stage3Count = stages.byStage[3].length || 36;
+  const R = Math.min(
+    stage3Count,
+    Math.max(
+      1,
+      bracketRoundsToTarget(qualified.length, FINALISTS_TARGET),
+      Math.ceil(Math.log2(Math.max(2, maxPool))) + 1
+    )
+  );
 
   const next: TournamentState = {
     ...state,
     phase: "knockout",
     knockout,
-    repechage, // pool inicial da repescagem = lanternas dos grupos
+    repechage,
     repechageComplete: false,
     cupRoundsDone: 0,
+    knockoutRounds: R,
+    finalists: mainAtTarget ? qualified : undefined,
     updatedAt: Date.now(),
   };
   await stateRef.set(next);
-
   logger.info(
-    `tournament[${groupId}]: Grupos → Eliminatórias (${qualified.length} classificados, ` +
-      `${repechage.length} na repescagem, ${knockout.matchups.length} confrontos)`
+    `tournament[${groupId}]: Etapa 2 → Eliminatória (${qualified.length} classificados, ` +
+      `${repechage.length} na repescagem, ${R} rodadas)`
   );
   return true;
 }
 
 /* ------------------------------------------------------------------ */
-/* Fatia 3: rodadas seguintes das Eliminatórias                        */
+/* Etapa 3 — Eliminatória + Repescagem (em paralelo), uma rodada/fatia */
 /* ------------------------------------------------------------------ */
 
-interface CupKnockoutRound {
-  label: string;
-  ids: Set<string>;
-  allFinished: boolean;
-  firstKickoff: number;
-}
-
-/** Rodadas do mata-mata da Copa presentes em `matches`, ordenadas por kickoff. */
-function orderedCupKnockoutRounds(matchDocs: FirebaseFirestore.QueryDocumentSnapshot[]): CupKnockoutRound[] {
-  const byRound = new Map<string, CupKnockoutRound>();
-  for (const d of matchDocs) {
-    const m = d.data() as MatchDoc;
-    if (cupRoundOf(m.round) !== "knockout") continue;
-    const label = String(m.round ?? "");
-    const e =
-      byRound.get(label) ?? { label, ids: new Set<string>(), allFinished: true, firstKickoff: Infinity };
-    e.ids.add(d.id);
-    if (m.status !== "finished") e.allFinished = false;
-    const k = (m.kickoff as FirebaseFirestore.Timestamp)?.toMillis?.() ?? 0;
-    e.firstKickoff = Math.min(e.firstKickoff, k);
-    byRound.set(label, e);
-  }
-  return [...byRound.values()].sort((a, b) => a.firstKickoff - b.firstKickoff);
-}
-
-/** Avança as Eliminatórias de todos os grupos conforme as rodadas da Copa terminam. */
-export async function progressKnockoutAllGroups(): Promise<{ advanced: number }> {
-  const db = getFirestore();
-  const matchesSnap = await db.collection("matches").get();
-  const cupRounds = orderedCupKnockoutRounds(matchesSnap.docs);
-  if (cupRounds.length === 0) return { advanced: 0 };
-
-  const groupsSnap = await db.collection("groups").get();
-  let advanced = 0;
-  for (const groupDoc of groupsSnap.docs) {
-    let any = false;
-    // Resolve quantas rodadas estiverem prontas nesta passada.
-    while (await advanceOneCupKnockoutRound(db, groupDoc.id, cupRounds)) any = true;
-    if (any) advanced++;
-  }
-  return { advanced };
-}
-
-/**
- * Avança UMA rodada de mata-mata da Copa, processando a chave principal e a
- * Repescagem EM PARALELO (ambas pontuam a mesma rodada da Copa). Idempotente via
- * `cupRoundsDone`. Retorna true se processou uma rodada (há mais por processar).
- */
-async function advanceOneCupKnockoutRound(
+async function stage3Round(
   db: Firestore,
   groupId: string,
-  cupRounds: CupKnockoutRound[]
+  state: TournamentState,
+  stages: StageInfo,
+  stateRef: DocumentReference
 ): Promise<boolean> {
-  const stateRef = db.doc(`groups/${groupId}/tournament/state`);
-  const state = (await stateRef.get()).data() as TournamentState | undefined;
-  if (!state || (state.phase !== "knockout" && state.phase !== "repechage")) return false;
   if (!state.knockout) return false;
 
-  const mainDecided = state.knockout.complete === true;
-  const repDecided = state.repechageComplete === true;
-  if (mainDecided && repDecided) return false; // era do mata-mata já resolvida
+  const mainDone = state.knockout.complete === true;
+  const repDone = state.repechageComplete === true;
 
-  const i = state.cupRoundsDone ?? 0;
-  const cupRound = cupRounds[i]; // i-ésima rodada de mata-mata da Copa
-  if (!cupRound || !cupRound.allFinished) return false;
-
-  // Pontos de cada participante nessa rodada da Copa.
-  const betsSnap = await db.collection(`groups/${groupId}/bets`).get();
-  const points: Record<string, number> = {};
-  for (const betDoc of betsSnap.docs) {
-    const b = betDoc.data() as BetDoc;
-    if (cupRound.ids.has(b.matchId)) points[b.userId] = (points[b.userId] ?? 0) + (b.points ?? 0);
+  // Ambos terminaram → fecha a Etapa 3 e vai para a Grande Final.
+  if (mainDone && repDone) {
+    if (state.phase === "final") return false;
+    return closeStage3(state, stateRef, groupId);
   }
 
-  const N = state.seeds?.length ?? state.knockout.matchups.flatMap((m) => m.players).length;
-  const next: TournamentState = { ...state, cupRoundsDone: i + 1, updatedAt: Date.now() };
+  const stage3 = stages.byStage[3];
+  const R = Math.max(1, state.knockoutRounds ?? 1);
+  const k = state.cupRoundsDone ?? 0;
 
-  // --- Chave principal ---
-  let droppers: typeof state.repechage = [];
-  if (!mainDecided && state.knockout.matchups.length > 0) {
+  // Rodadas planejadas esgotadas mas algo não fechou → força o fechamento.
+  if (k >= R) return forceCloseStage3(state, stateRef, groupId);
+
+  const chunk = Math.max(1, Math.floor(stage3.length / R));
+  const lo = k * chunk;
+  const hi = k === R - 1 ? stage3.length : (k + 1) * chunk;
+  const roundIds = stage3.slice(lo, hi);
+  if (!allFinished(roundIds, stages.finished)) return false; // a fatia ainda não terminou
+
+  const points = await pointsForMatches(db, groupId, new Set(roundIds));
+  const N = state.seeds?.length ?? state.knockout.matchups.flatMap((m) => m.players).length;
+  const next: TournamentState = { ...state, cupRoundsDone: k + 1, updatedAt: Date.now() };
+
+  // --- Chave principal (uma rodada) ---
+  let droppers: QualifiedParticipant[] = [];
+  if (!mainDone && state.knockout.matchups.length > 0) {
     const res = resolveKnockoutRound(state.knockout, points, N);
-    droppers = res.toRepechage; // perdedores de Duelos caem na repescagem
-    if (res.survivors.length <= 1) {
-      next.mainBracketWinner = res.survivors[0] ?? null;
-      next.knockout = { ...state.knockout, complete: true };
-      logger.info(`tournament[${groupId}]: chave principal definida (vencedor ${next.mainBracketWinner?.uid ?? "—"})`);
+    // Etapa 3: TODOS os eliminados (duelos e triplos) vão para a repescagem.
+    droppers = [...res.toRepechage, ...res.eliminated];
+    if (res.survivors.length <= FINALISTS_TARGET) {
+      next.knockout = { round: state.knockout.round, matchups: [], complete: true };
+      next.finalists = res.survivors; // sobreviventes da chave (parte dos finalistas)
+      logger.info(`tournament[${groupId}]: chave principal definida (${res.survivors.length} finalistas)`);
     } else {
       next.knockout = drawKnockoutRound(res.survivors, state.knockout.round + 1);
-      logger.info(
-        `tournament[${groupId}]: Eliminatórias rodada ${state.knockout.round}→${state.knockout.round + 1} ` +
-          `(${res.survivors.length} avançam, ${res.toRepechage.length} à repescagem)`
-      );
     }
-  } else if (!mainDecided) {
-    // Chave vazia (ex.: grupo de 1 membro) → encerra sem mover ninguém.
-    next.mainBracketWinner = state.mainBracketWinner ?? null;
-    next.knockout = { ...state.knockout, complete: true };
   }
 
-  // --- Repescagem (em paralelo, mesma rodada da Copa) ---
+  // --- Repescagem (uma redução, em paralelo) ---
   let pool = state.repechage ?? [];
-  if (!repDecided && pool.length > 1) {
-    pool = resolveRepechageRound(pool, points).survivors;
-  }
-  pool = [...pool, ...(droppers ?? [])]; // novos perdedores entram para a próxima rodada
+  if (!repDone && pool.length > 1) pool = resolveRepechageRound(pool, points).survivors;
+  pool = [...pool, ...droppers]; // novos eliminados entram para a próxima rodada
   next.repechage = pool;
 
-  // A repescagem só pode terminar quando a chave principal acabou (não há mais
-  // perdedores para cair) e sobrou ≤ 1 contendor.
-  const mainNowDecided = next.knockout?.complete === true;
-  if (!repDecided && mainNowDecided && pool.length <= 1) {
+  // Repescagem só fecha quando a chave acabou (sem mais eliminados) e sobra ≤ 1.
+  if (!repDone && next.knockout?.complete === true && pool.length <= 1) {
     next.repechageWinner = pool[0] ?? null;
     next.repechageComplete = true;
     next.repechage = [];
     logger.info(`tournament[${groupId}]: repescagem definida (sobrevivente ${next.repechageWinner?.uid ?? "—"})`);
   }
 
-  // --- Transições de fase ---
-  if (next.knockout?.complete && next.repechageComplete) next.phase = "final";
-  else if (next.knockout?.complete) next.phase = "repechage"; // chave acabou, repescagem segue
+  // Ambos fechados nesta rodada → monta finalistas e vai para a Grande Final.
+  if (next.knockout?.complete === true && next.repechageComplete === true) {
+    assembleFinalists(next);
+    next.phase = "final";
+  }
 
   await stateRef.set(next);
   return true;
 }
 
-/* ------------------------------------------------------------------ */
-/* Fatia 4: Grande Final                                               */
-/* ------------------------------------------------------------------ */
-
-/** Resolve a Grande Final de todos os grupos quando os jogos da Final da Copa terminam. */
-export async function progressFinalAllGroups(): Promise<{ advanced: number }> {
-  const db = getFirestore();
-  const matchesSnap = await db.collection("matches").get();
-  const finals = matchesSnap.docs.filter(
-    (d) => cupRoundOf((d.data() as MatchDoc).round) === "final"
-  );
-  if (finals.length === 0) return { advanced: 0 };
-  if (!finals.every((d) => (d.data() as MatchDoc).status === "finished")) return { advanced: 0 };
-
-  const finalIds = new Set(finals.map((d) => d.id));
-  const groupsSnap = await db.collection("groups").get();
-  let advanced = 0;
-  for (const groupDoc of groupsSnap.docs) {
-    if (await resolveFinalForGroup(db, groupDoc.id, finalIds)) advanced++;
-  }
-  return { advanced };
+/** Junta sobreviventes da chave + sobrevivente da repescagem em `finalists`. */
+function assembleFinalists(state: TournamentState): void {
+  const fromBracket = state.finalists ?? [];
+  const finalists = [...fromBracket];
+  if (state.repechageWinner) finalists.push(state.repechageWinner);
+  state.finalists = finalists;
 }
 
-async function resolveFinalForGroup(
+/** Fecha a Etapa 3 quando chave e repescagem já terminaram (sem rodada nova). */
+async function closeStage3(
+  state: TournamentState,
+  stateRef: DocumentReference,
+  groupId: string
+): Promise<boolean> {
+  const next: TournamentState = { ...state, phase: "final", updatedAt: Date.now() };
+  assembleFinalists(next);
+  await stateRef.set(next);
+  logger.info(`tournament[${groupId}]: Etapa 3 → Grande Final (${next.finalists?.length ?? 0} finalistas)`);
+  return true;
+}
+
+/**
+ * Fechamento forçado da Etapa 3 (rodadas planejadas esgotaram antes de tudo
+ * resolver): sobreviventes atuais da chave viram finalistas; a repescagem é
+ * decidida pelo melhor seed remanescente.
+ */
+async function forceCloseStage3(
+  state: TournamentState,
+  stateRef: DocumentReference,
+  groupId: string
+): Promise<boolean> {
+  const next: TournamentState = { ...state, phase: "final", updatedAt: Date.now() };
+
+  if (next.knockout && next.knockout.complete !== true) {
+    const survivors = next.knockout.matchups.flatMap((m) => m.players);
+    next.knockout = { round: next.knockout.round, matchups: [], complete: true };
+    next.finalists = survivors;
+  }
+  if (next.repechageComplete !== true) {
+    const pool = next.repechage ?? [];
+    next.repechageWinner = pool.length ? [...pool].sort((a, b) => a.seed - b.seed)[0] : null;
+    next.repechageComplete = true;
+    next.repechage = [];
+  }
+  assembleFinalists(next);
+  await stateRef.set(next);
+  logger.info(`tournament[${groupId}]: Etapa 3 fechada (forçado) — ${next.finalists?.length ?? 0} finalistas`);
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Etapa 4 — Grande Final (corrida de pontos nos 32 jogos)             */
+/* ------------------------------------------------------------------ */
+
+async function stage4Final(
   db: Firestore,
   groupId: string,
-  finalIds: Set<string>
+  state: TournamentState,
+  stages: StageInfo,
+  stateRef: DocumentReference
 ): Promise<boolean> {
-  const stateRef = db.doc(`groups/${groupId}/tournament/state`);
-  const state = (await stateRef.get()).data() as TournamentState | undefined;
-  if (!state || state.phase === "done") return false; // já decidido
-  // Só decide a Final quando a chave principal terminou.
-  if (state.knockout?.complete !== true) return false;
+  const ids = stages.byStage[4];
+  if (!allFinished(ids, stages.finished)) return false;
 
-  // Fecha a Repescagem se ainda em disputa (rodadas de mata-mata da Copa
-  // esgotaram antes de sobrar 1) — escolhe o melhor seed remanescente.
-  let repWinner = state.repechageWinner ?? null;
-  if (!state.repechageComplete) {
-    const pool = state.repechage ?? [];
-    repWinner = pool.length ? [...pool].sort((a, b) => a.seed - b.seed)[0] : null;
+  const finalists = state.finalists ?? [];
+  if (finalists.length === 0) {
+    await stateRef.set({ ...state, phase: "done", champion: null, runnerUp: null, updatedAt: Date.now() });
+    logger.info(`tournament[${groupId}]: Grande Final sem finalistas (encerrado sem campeão)`);
+    return true;
   }
 
-  const finalists = [state.mainBracketWinner, repWinner].filter(
-    (p): p is QualifiedParticipant => !!p
-  );
-
-  // Pontos dos jogos da Final da Copa por participante.
-  const betsSnap = await db.collection(`groups/${groupId}/bets`).get();
-  const points: Record<string, number> = {};
-  for (const betDoc of betsSnap.docs) {
-    const b = betDoc.data() as BetDoc;
-    if (finalIds.has(b.matchId)) points[b.userId] = (points[b.userId] ?? 0) + (b.points ?? 0);
-  }
-
+  const points = await pointsForMatches(db, groupId, new Set(ids));
   const { champion, runnerUp } = resolveFinal(finalists, points);
-  const next: TournamentState = {
-    ...state,
-    phase: "done",
-    repechageWinner: repWinner,
-    repechageComplete: true,
-    repechage: [],
-    champion,
-    runnerUp,
-    updatedAt: Date.now(),
-  };
-  await stateRef.set(next);
+  await stateRef.set({ ...state, phase: "done", champion, runnerUp, updatedAt: Date.now() });
   logger.info(`tournament[${groupId}]: Grande Final decidida (campeão ${champion?.uid ?? "—"})`);
   return true;
 }
