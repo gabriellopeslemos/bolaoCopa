@@ -22,6 +22,7 @@ import {
   progressQualifierAllGroups,
   progressGroupsToKnockoutAllGroups,
   progressKnockoutAllGroups,
+  progressFinalAllGroups,
 } from "./tournament";
 import { matchTournamentPhase } from "@bolao/scoring";
 import type { MatchDoc } from "./types";
@@ -141,6 +142,7 @@ export const onMatchWrite = onDocumentWritten("matches/{matchId}", async (event)
   if (phase === "qualifier") await progressQualifierAllGroups();
   else if (phase === "groups") await progressGroupsToKnockoutAllGroups();
   else if (phase === "knockout") await progressKnockoutAllGroups();
+  else if (phase === "final") await progressFinalAllGroups();
 });
 
 /** Avança o torneio sob demanda (apenas admin) — útil para testes. */
@@ -149,7 +151,8 @@ export const progressTournamentNow = onCall(async (req) => {
   const qualifier = await progressQualifierAllGroups();
   const toKnockout = await progressGroupsToKnockoutAllGroups();
   const knockoutRounds = await progressKnockoutAllGroups();
-  return { qualifier, toKnockout, knockoutRounds };
+  const grandFinal = await progressFinalAllGroups();
+  return { qualifier, toKnockout, knockoutRounds, grandFinal };
 });
 
 /** Entrar em um grupo via código de convite. */
