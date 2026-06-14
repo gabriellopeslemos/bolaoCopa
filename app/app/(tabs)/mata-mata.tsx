@@ -102,13 +102,74 @@ export default function MataMataScreen() {
 }
 
 function LiveTournament({ state }: { state: TournamentState }) {
-  const { phase, seeds = [], groups, knockout, repechage, mainBracketWinner } = state;
+  const {
+    phase, seeds = [], groups, knockout, repechage,
+    mainBracketWinner, repechageWinner, champion, runnerUp,
+  } = state;
+  const finalists = [mainBracketWinner, repechageWinner].filter(Boolean) as NonNullable<
+    typeof mainBracketWinner
+  >[];
   return (
     <>
       <View style={styles.phaseChip}>
         <Ionicons name="ellipse" size={8} color={palette.primary} />
         <Text variant="label" color={palette.primary}>Fase atual: {PHASE_LABEL[phase]}</Text>
       </View>
+
+      {champion && (
+        <Card style={[styles.winnerCard, styles.championCard]}>
+          <Ionicons name="trophy" size={26} color={palette.gold} />
+          <View style={{ flex: 1 }}>
+            <Text variant="caption" color={palette.textMuted}>Campeão do torneio</Text>
+            <Text variant="title" numberOfLines={1}>{champion.displayName ?? "Participante"}</Text>
+            {runnerUp && (
+              <Text variant="caption" color={palette.textFaint}>
+                Vice: {runnerUp.displayName ?? "Participante"}
+              </Text>
+            )}
+          </View>
+        </Card>
+      )}
+
+      {(phase === "final" || phase === "done") && finalists.length > 0 && !champion && (
+        <View style={{ gap: spacing.sm }}>
+          <Text variant="label" color={palette.textMuted}>Grande Final</Text>
+          <Card style={{ gap: spacing.sm }}>
+            {finalists.map((p, i) => (
+              <View key={p.uid}>
+                {i > 0 && (
+                  <Text variant="caption" color={palette.textFaint} style={styles.vs}>vs</Text>
+                )}
+                <View style={styles.memberRow}>
+                  <Ionicons
+                    name={i === 0 ? "git-network-outline" : "refresh-outline"}
+                    size={18}
+                    color={palette.primary}
+                  />
+                  <Avatar name={p.displayName ?? "?"} size={30} />
+                  <Text variant="bodyMed" style={{ flex: 1 }} numberOfLines={1}>
+                    {p.displayName ?? "Participante"}
+                  </Text>
+                  <Text variant="caption" color={palette.textFaint}>
+                    {i === 0 ? "Chave principal" : "Repescagem"}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </Card>
+        </View>
+      )}
+
+      {repechageWinner && phase !== "done" && (
+        <Card style={styles.winnerCard}>
+          <Ionicons name="refresh-circle" size={22} color={palette.cyan} />
+          <View style={{ flex: 1 }}>
+            <Text variant="caption" color={palette.textMuted}>Sobrevivente da Repescagem</Text>
+            <Text variant="subtitle" numberOfLines={1}>{repechageWinner.displayName ?? "Participante"}</Text>
+            <Text variant="caption" color={palette.textFaint}>Classificado para a Grande Final</Text>
+          </View>
+        </Card>
+      )}
 
       {mainBracketWinner && (
         <Card style={styles.winnerCard}>
@@ -134,7 +195,7 @@ function LiveTournament({ state }: { state: TournamentState }) {
 
       {repechage && repechage.length > 0 && (
         <View style={{ gap: spacing.sm }}>
-          <Text variant="label" color={palette.textMuted}>Repescagem (lanternas dos grupos)</Text>
+          <Text variant="label" color={palette.textMuted}>Repescagem (em disputa)</Text>
           <Card style={{ gap: spacing.sm }}>
             {repechage.map((p) => (
               <View key={p.uid} style={styles.memberRow}>
@@ -289,6 +350,7 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
   },
   winnerCard: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  championCard: { borderWidth: 1, borderColor: palette.gold },
   matchHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   kindTag: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.sm },
   vs: { marginLeft: 30 + spacing.sm, marginVertical: 2 },

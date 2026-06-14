@@ -11,6 +11,8 @@ import {
   drawKnockoutRound1,
   drawKnockoutRound,
   resolveKnockoutRound,
+  resolveRepechageRound,
+  resolveFinal,
   type SeedInput,
   type DrawGroup,
   type QualifiedParticipant,
@@ -298,5 +300,78 @@ describe("resolveKnockoutRound", () => {
     const r2 = drawKnockoutRound(res.survivors, 2);
     expect(r2.round).toBe(2);
     expect(r2.matchups.flatMap((m) => m.players).length).toBe(4);
+  });
+});
+
+describe("resolveRepechageRound", () => {
+  const p = (uid: string, seed: number): QualifiedParticipant =>
+    ({ uid, groupId: "X", placement: 1, seed, difficulty: 0 });
+
+  it("elimina a metade de baixo (sobra ceil(n/2))", () => {
+    const contenders = [p("a", 1), p("b", 2), p("c", 3), p("d", 4)];
+    const { survivors, eliminated } = resolveRepechageRound(contenders, {
+      a: 10, b: 8, c: 5, d: 1,
+    });
+    expect(survivors.map((x) => x.uid)).toEqual(["a", "b"]);
+    expect(eliminated.map((x) => x.uid)).toEqual(["c", "d"]);
+  });
+
+  it("ímpar: sobra um a mais (ceil) — n=3 mantém 2", () => {
+    const { survivors, eliminated } = resolveRepechageRound(
+      [p("a", 1), p("b", 2), p("c", 3)],
+      { a: 5, b: 9, c: 1 }
+    );
+    expect(survivors.map((x) => x.uid)).toEqual(["b", "a"]);
+    expect(eliminated.map((x) => x.uid)).toEqual(["c"]);
+  });
+
+  it("empate na pontuação resolve pelo melhor seed", () => {
+    const { survivors } = resolveRepechageRound([p("a", 5), p("b", 2)], { a: 7, b: 7 });
+    expect(survivors.map((x) => x.uid)).toEqual(["b"]); // seed 2 < 5
+  });
+
+  it("1 contendor → ele mesmo sobrevive (é o vencedor da repescagem)", () => {
+    const { survivors, eliminated } = resolveRepechageRound([p("a", 1)], {});
+    expect(survivors.map((x) => x.uid)).toEqual(["a"]);
+    expect(eliminated).toEqual([]);
+  });
+
+  it("converge até sobrar 1 ao longo das rodadas", () => {
+    let pool = [p("a", 1), p("b", 2), p("c", 3), p("d", 4), p("e", 5)];
+    // 5 → 3 → 2 → 1
+    const rounds = [3, 2, 1];
+    for (const expected of rounds) {
+      pool = resolveRepechageRound(
+        pool,
+        Object.fromEntries(pool.map((x, i) => [x.uid, pool.length - i]))
+      ).survivors;
+      expect(pool.length).toBe(expected);
+    }
+  });
+});
+
+describe("resolveFinal", () => {
+  const p = (uid: string, seed: number): QualifiedParticipant =>
+    ({ uid, groupId: "X", placement: 1, seed, difficulty: 0 });
+
+  it("o de maior pontuação é o campeão; o outro, vice", () => {
+    const { champion, runnerUp } = resolveFinal([p("a", 2), p("b", 1)], { a: 12, b: 9 });
+    expect(champion?.uid).toBe("a");
+    expect(runnerUp?.uid).toBe("b");
+  });
+
+  it("empate resolve pelo melhor seed", () => {
+    const { champion } = resolveFinal([p("a", 5), p("b", 3)], { a: 8, b: 8 });
+    expect(champion?.uid).toBe("b");
+  });
+
+  it("um único finalista é campeão direto", () => {
+    const { champion, runnerUp } = resolveFinal([p("a", 1)], {});
+    expect(champion?.uid).toBe("a");
+    expect(runnerUp).toBeNull();
+  });
+
+  it("sem finalistas → sem campeão", () => {
+    expect(resolveFinal([], {})).toEqual({ champion: null, runnerUp: null });
   });
 });

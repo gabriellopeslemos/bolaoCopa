@@ -412,6 +412,64 @@ export function resolveKnockoutRound(
 }
 
 /* ------------------------------------------------------------------ */
+/* Repescagem (segunda chance — corre em PARALELO à chave principal)    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Resolve UMA rodada da Repescagem.
+ *
+ * Decisão de design (padrão razoável, documentado — ajustável depois): a
+ * Repescagem é um "torneio dos perdedores" que corre EM PARALELO às
+ * Eliminatórias, consumindo as MESMAS rodadas de mata-mata da Copa. A cada
+ * rodada da Copa, todos os contendores da repescagem são ranqueados pelos
+ * pontos daquela rodada (todos-contra-todos) e a METADE de baixo é eliminada
+ * (sobra ceil(n/2); empate pelo melhor seed). Os perdedores de Duelos da chave
+ * principal "caem" na repescagem e entram no pool da rodada seguinte. Repete
+ * até sobrar 1 — o sobrevivente vai à Grande Final.
+ *
+ * Por que paralelo e não sequencial? A Copa tem poucas rodadas de mata-mata; se
+ * a repescagem só começasse após a chave principal terminar, não sobrariam
+ * jogos da Copa para pontuá-la. Em paralelo, ela cabe na linha do tempo da Copa.
+ */
+export function resolveRepechageRound(
+  contenders: QualifiedParticipant[],
+  pointsByUid: Record<string, number>
+): { survivors: QualifiedParticipant[]; eliminated: QualifiedParticipant[] } {
+  if (contenders.length <= 1) return { survivors: [...contenders], eliminated: [] };
+  const ranked = [...contenders].sort(
+    (a, b) => (pointsByUid[b.uid] ?? 0) - (pointsByUid[a.uid] ?? 0) || a.seed - b.seed
+  );
+  const keep = Math.ceil(ranked.length / 2);
+  return { survivors: ranked.slice(0, keep), eliminated: ranked.slice(keep) };
+}
+
+/* ------------------------------------------------------------------ */
+/* Grande Final                                                        */
+/* ------------------------------------------------------------------ */
+
+export interface FinalResult {
+  /** Campeão do bolão (maior pontuação na Final; desempate por melhor seed). */
+  champion: QualifiedParticipant | null;
+  /** Vice-campeão (2º melhor), se houver. */
+  runnerUp: QualifiedParticipant | null;
+}
+
+/**
+ * Resolve a Grande Final: os finalistas (vencedor da chave principal +
+ * sobrevivente da Repescagem) são ranqueados pelos pontos dos jogos da Final da
+ * Copa. O melhor é o campeão; o segundo, vice. Empate pelo melhor seed.
+ */
+export function resolveFinal(
+  finalists: QualifiedParticipant[],
+  pointsByUid: Record<string, number>
+): FinalResult {
+  const ranked = [...finalists].sort(
+    (a, b) => (pointsByUid[b.uid] ?? 0) - (pointsByUid[a.uid] ?? 0) || a.seed - b.seed
+  );
+  return { champion: ranked[0] ?? null, runnerUp: ranked[1] ?? null };
+}
+
+/* ------------------------------------------------------------------ */
 /* Modelo de dados persistido (documentação da forma do estado)        */
 /* ------------------------------------------------------------------ */
 
@@ -426,8 +484,24 @@ export interface TournamentState {
   knockout?: KnockoutRound;
   /** Vencedor da chave principal (definido quando sobra 1) — vai à Grande Final. */
   mainBracketWinner?: QualifiedParticipant | null;
-  /** Lanternas dos grupos + perdedores de Duelos, na Repescagem. */
+  /**
+   * Contendores AINDA na Repescagem (lanternas dos grupos + perdedores de
+   * Duelos que ainda não foram eliminados). Encolhe a cada rodada da Copa.
+   */
   repechage?: QualifiedParticipant[];
+  /** Sobrevivente da Repescagem (definido quando sobra 1) — vai à Grande Final. */
+  repechageWinner?: QualifiedParticipant | null;
+  /** true quando a Repescagem terminou (sobrou ≤ 1 e a chave principal acabou). */
+  repechageComplete?: boolean;
+  /**
+   * Nº de rodadas de mata-mata da Copa já processadas (avança chave principal e
+   * repescagem juntas, 1 por rodada da Copa). Garante idempotência do gatilho.
+   */
+  cupRoundsDone?: number;
+  /** Campeão do bolão (definido ao fim da Grande Final). */
+  champion?: QualifiedParticipant | null;
+  /** Vice-campeão do bolão. */
+  runnerUp?: QualifiedParticipant | null;
   /** Epoch ms da última atualização. */
   updatedAt?: number;
 }

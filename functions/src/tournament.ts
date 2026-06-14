@@ -17,10 +17,13 @@ import {
   drawKnockoutRound1,
   drawKnockoutRound,
   resolveKnockoutRound,
+  resolveRepechageRound,
+  resolveFinal,
   cupRoundOf,
   matchTournamentPhase,
   type SeedInput,
   type TournamentState,
+  type QualifiedParticipant,
 } from "@bolao/scoring";
 import type { MatchDoc, BetDoc } from "./types";
 
@@ -156,7 +159,9 @@ async function buildKnockoutForGroup(
     ...state,
     phase: "knockout",
     knockout,
-    repechage,
+    repechage, // pool inicial da repescagem = lanternas dos grupos
+    repechageComplete: false,
+    cupRoundsDone: 0,
     updatedAt: Date.now(),
   };
   await stateRef.set(next);
@@ -209,23 +214,33 @@ export async function progressKnockoutAllGroups(): Promise<{ advanced: number }>
   for (const groupDoc of groupsSnap.docs) {
     let any = false;
     // Resolve quantas rodadas estiverem prontas nesta passada.
-    while (await advanceOneKnockoutRound(db, groupDoc.id, cupRounds)) any = true;
+    while (await advanceOneCupKnockoutRound(db, groupDoc.id, cupRounds)) any = true;
     if (any) advanced++;
   }
   return { advanced };
 }
 
-async function advanceOneKnockoutRound(
+/**
+ * Avança UMA rodada de mata-mata da Copa, processando a chave principal e a
+ * Repescagem EM PARALELO (ambas pontuam a mesma rodada da Copa). Idempotente via
+ * `cupRoundsDone`. Retorna true se processou uma rodada (há mais por processar).
+ */
+async function advanceOneCupKnockoutRound(
   db: Firestore,
   groupId: string,
   cupRounds: CupKnockoutRound[]
 ): Promise<boolean> {
   const stateRef = db.doc(`groups/${groupId}/tournament/state`);
   const state = (await stateRef.get()).data() as TournamentState | undefined;
-  if (state?.phase !== "knockout" || !state.knockout || state.knockout.complete) return false;
+  if (!state || (state.phase !== "knockout" && state.phase !== "repechage")) return false;
+  if (!state.knockout) return false;
 
-  const r = state.knockout.round; // 1-indexado
-  const cupRound = cupRounds[r - 1]; // rodada r ↔ r-ésima rodada de mata-mata da Copa
+  const mainDecided = state.knockout.complete === true;
+  const repDecided = state.repechageComplete === true;
+  if (mainDecided && repDecided) return false; // era do mata-mata já resolvida
+
+  const i = state.cupRoundsDone ?? 0;
+  const cupRound = cupRounds[i]; // i-ésima rodada de mata-mata da Copa
   if (!cupRound || !cupRound.allFinished) return false;
 
   // Pontos de cada participante nessa rodada da Copa.
@@ -237,21 +252,122 @@ async function advanceOneKnockoutRound(
   }
 
   const N = state.seeds?.length ?? state.knockout.matchups.flatMap((m) => m.players).length;
-  const res = resolveKnockoutRound(state.knockout, points, N);
-  const repechage = [...(state.repechage ?? []), ...res.toRepechage];
+  const next: TournamentState = { ...state, cupRoundsDone: i + 1, updatedAt: Date.now() };
 
-  const next: TournamentState = { ...state, repechage, updatedAt: Date.now() };
-  if (res.survivors.length <= 1) {
-    next.mainBracketWinner = res.survivors[0] ?? null;
-    next.knockout = { ...state.knockout, complete: true }; // marca o fim (evita reprocessar)
-    logger.info(`tournament[${groupId}]: chave principal definida (vencedor ${next.mainBracketWinner?.uid ?? "—"})`);
-  } else {
-    next.knockout = drawKnockoutRound(res.survivors, r + 1);
-    logger.info(
-      `tournament[${groupId}]: Eliminatórias rodada ${r}→${r + 1} ` +
-        `(${res.survivors.length} avançam, ${res.toRepechage.length} à repescagem, ${res.eliminated.length} eliminados)`
-    );
+  // --- Chave principal ---
+  let droppers: typeof state.repechage = [];
+  if (!mainDecided && state.knockout.matchups.length > 0) {
+    const res = resolveKnockoutRound(state.knockout, points, N);
+    droppers = res.toRepechage; // perdedores de Duelos caem na repescagem
+    if (res.survivors.length <= 1) {
+      next.mainBracketWinner = res.survivors[0] ?? null;
+      next.knockout = { ...state.knockout, complete: true };
+      logger.info(`tournament[${groupId}]: chave principal definida (vencedor ${next.mainBracketWinner?.uid ?? "—"})`);
+    } else {
+      next.knockout = drawKnockoutRound(res.survivors, state.knockout.round + 1);
+      logger.info(
+        `tournament[${groupId}]: Eliminatórias rodada ${state.knockout.round}→${state.knockout.round + 1} ` +
+          `(${res.survivors.length} avançam, ${res.toRepechage.length} à repescagem)`
+      );
+    }
+  } else if (!mainDecided) {
+    // Chave vazia (ex.: grupo de 1 membro) → encerra sem mover ninguém.
+    next.mainBracketWinner = state.mainBracketWinner ?? null;
+    next.knockout = { ...state.knockout, complete: true };
   }
+
+  // --- Repescagem (em paralelo, mesma rodada da Copa) ---
+  let pool = state.repechage ?? [];
+  if (!repDecided && pool.length > 1) {
+    pool = resolveRepechageRound(pool, points).survivors;
+  }
+  pool = [...pool, ...(droppers ?? [])]; // novos perdedores entram para a próxima rodada
+  next.repechage = pool;
+
+  // A repescagem só pode terminar quando a chave principal acabou (não há mais
+  // perdedores para cair) e sobrou ≤ 1 contendor.
+  const mainNowDecided = next.knockout?.complete === true;
+  if (!repDecided && mainNowDecided && pool.length <= 1) {
+    next.repechageWinner = pool[0] ?? null;
+    next.repechageComplete = true;
+    next.repechage = [];
+    logger.info(`tournament[${groupId}]: repescagem definida (sobrevivente ${next.repechageWinner?.uid ?? "—"})`);
+  }
+
+  // --- Transições de fase ---
+  if (next.knockout?.complete && next.repechageComplete) next.phase = "final";
+  else if (next.knockout?.complete) next.phase = "repechage"; // chave acabou, repescagem segue
+
   await stateRef.set(next);
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Fatia 4: Grande Final                                               */
+/* ------------------------------------------------------------------ */
+
+/** Resolve a Grande Final de todos os grupos quando os jogos da Final da Copa terminam. */
+export async function progressFinalAllGroups(): Promise<{ advanced: number }> {
+  const db = getFirestore();
+  const matchesSnap = await db.collection("matches").get();
+  const finals = matchesSnap.docs.filter(
+    (d) => cupRoundOf((d.data() as MatchDoc).round) === "final"
+  );
+  if (finals.length === 0) return { advanced: 0 };
+  if (!finals.every((d) => (d.data() as MatchDoc).status === "finished")) return { advanced: 0 };
+
+  const finalIds = new Set(finals.map((d) => d.id));
+  const groupsSnap = await db.collection("groups").get();
+  let advanced = 0;
+  for (const groupDoc of groupsSnap.docs) {
+    if (await resolveFinalForGroup(db, groupDoc.id, finalIds)) advanced++;
+  }
+  return { advanced };
+}
+
+async function resolveFinalForGroup(
+  db: Firestore,
+  groupId: string,
+  finalIds: Set<string>
+): Promise<boolean> {
+  const stateRef = db.doc(`groups/${groupId}/tournament/state`);
+  const state = (await stateRef.get()).data() as TournamentState | undefined;
+  if (!state || state.phase === "done") return false; // já decidido
+  // Só decide a Final quando a chave principal terminou.
+  if (state.knockout?.complete !== true) return false;
+
+  // Fecha a Repescagem se ainda em disputa (rodadas de mata-mata da Copa
+  // esgotaram antes de sobrar 1) — escolhe o melhor seed remanescente.
+  let repWinner = state.repechageWinner ?? null;
+  if (!state.repechageComplete) {
+    const pool = state.repechage ?? [];
+    repWinner = pool.length ? [...pool].sort((a, b) => a.seed - b.seed)[0] : null;
+  }
+
+  const finalists = [state.mainBracketWinner, repWinner].filter(
+    (p): p is QualifiedParticipant => !!p
+  );
+
+  // Pontos dos jogos da Final da Copa por participante.
+  const betsSnap = await db.collection(`groups/${groupId}/bets`).get();
+  const points: Record<string, number> = {};
+  for (const betDoc of betsSnap.docs) {
+    const b = betDoc.data() as BetDoc;
+    if (finalIds.has(b.matchId)) points[b.userId] = (points[b.userId] ?? 0) + (b.points ?? 0);
+  }
+
+  const { champion, runnerUp } = resolveFinal(finalists, points);
+  const next: TournamentState = {
+    ...state,
+    phase: "done",
+    repechageWinner: repWinner,
+    repechageComplete: true,
+    repechage: [],
+    champion,
+    runnerUp,
+    updatedAt: Date.now(),
+  };
+  await stateRef.set(next);
+  logger.info(`tournament[${groupId}]: Grande Final decidida (campeão ${champion?.uid ?? "—"})`);
   return true;
 }
