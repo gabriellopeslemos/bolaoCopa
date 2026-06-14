@@ -3,8 +3,10 @@ import { View, ScrollView, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useActiveGroup } from "@/hooks/useActiveGroup";
-import { Screen, Text, Card } from "@/components/ui";
+import { useTournament } from "@/lib/data";
+import { Screen, Text, Card, Avatar } from "@/components/ui";
 import { palette, spacing, radius } from "@/lib/theme";
+import type { TournamentPhase, TournamentState, Matchup } from "@/lib/types";
 
 type Phase = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -60,16 +62,25 @@ const PHASES: Phase[] = [
     icon: "trophy-outline",
     name: "5 · Grande Final",
     summary: "Sobreviventes da chave + remanescente da repescagem.",
-    rules: [
-      "Pontos zerados.",
-      "Melhor desempenho nos jogos finais vence o torneio.",
-    ],
+    rules: ["Pontos zerados.", "Melhor desempenho nos jogos finais vence o torneio."],
   },
 ];
 
+const PHASE_LABEL: Record<TournamentPhase, string> = {
+  qualifier: "Qualificatória",
+  groups: "Fase de Grupos",
+  knockout: "Eliminatórias",
+  repechage: "Repescagem",
+  final: "Grande Final",
+  done: "Encerrado",
+};
+
 export default function MataMataScreen() {
   const insets = useSafeAreaInsets();
-  const { activeGroup } = useActiveGroup();
+  const { activeGroup, activeGroupId } = useActiveGroup();
+  const tournament = useTournament(activeGroupId);
+  const state = tournament.data;
+  const started = !!state?.seeds?.length;
 
   return (
     <Screen edges={{ top: true }}>
@@ -84,54 +95,203 @@ export default function MataMataScreen() {
         contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + spacing.xl }]}
         showsVerticalScrollIndicator={false}
       >
-        <Card style={styles.banner}>
-          <Ionicons name="construct-outline" size={20} color={palette.primary} />
-          <View style={{ flex: 1 }}>
-            <Text variant="bodyMed">Torneio ainda não iniciado</Text>
-            <Text variant="caption" color={palette.textMuted}>
-              O chaveamento aparece aqui quando a Qualificatória terminar e os Seeds forem definidos.
-            </Text>
-          </View>
-        </Card>
-
-        <View style={styles.note}>
-          <Ionicons name="information-circle-outline" size={15} color={palette.textMuted} />
-          <Text variant="caption" color={palette.textMuted}>Os pontos são zerados ao fim de cada fase.</Text>
-        </View>
-
-        {PHASES.map((p, i) => (
-          <Card key={p.name} style={styles.phase}>
-            <View style={styles.phaseTop}>
-              <View style={styles.phaseIcon}>
-                <Ionicons name={p.icon} size={18} color={palette.primary} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text variant="subtitle">{p.name}</Text>
-                <Text variant="caption" color={palette.textMuted}>{p.summary}</Text>
-              </View>
-            </View>
-            <View style={styles.rules}>
-              {p.rules.map((r) => (
-                <View key={r} style={styles.ruleRow}>
-                  <View style={styles.bullet} />
-                  <Text variant="caption" color={palette.textMuted} style={{ flex: 1 }}>{r}</Text>
-                </View>
-              ))}
-            </View>
-            {i < PHASES.length - 1 && (
-              <Ionicons name="chevron-down" size={16} color={palette.textFaint}
-                style={{ alignSelf: "center", marginTop: spacing.sm }} />
-            )}
-          </Card>
-        ))}
+        {started ? <LiveTournament state={state!} /> : <FormatGuide />}
       </ScrollView>
     </Screen>
+  );
+}
+
+function LiveTournament({ state }: { state: TournamentState }) {
+  const { phase, seeds = [], groups, knockout, repechage, mainBracketWinner } = state;
+  return (
+    <>
+      <View style={styles.phaseChip}>
+        <Ionicons name="ellipse" size={8} color={palette.primary} />
+        <Text variant="label" color={palette.primary}>Fase atual: {PHASE_LABEL[phase]}</Text>
+      </View>
+
+      {mainBracketWinner && (
+        <Card style={styles.winnerCard}>
+          <Ionicons name="trophy" size={22} color={palette.gold} />
+          <View style={{ flex: 1 }}>
+            <Text variant="caption" color={palette.textMuted}>Vencedor da chave principal</Text>
+            <Text variant="subtitle" numberOfLines={1}>{mainBracketWinner.displayName ?? "Participante"}</Text>
+            <Text variant="caption" color={palette.textFaint}>Classificado para a Grande Final</Text>
+          </View>
+        </Card>
+      )}
+
+      {knockout && knockout.matchups.length > 0 && (
+        <View style={{ gap: spacing.md }}>
+          <Text variant="label" color={palette.textMuted}>
+            Eliminatórias · {knockout.round}ª rodada
+          </Text>
+          {knockout.matchups.map((m, i) => (
+            <MatchupCard key={i} matchup={m} />
+          ))}
+        </View>
+      )}
+
+      {repechage && repechage.length > 0 && (
+        <View style={{ gap: spacing.sm }}>
+          <Text variant="label" color={palette.textMuted}>Repescagem (lanternas dos grupos)</Text>
+          <Card style={{ gap: spacing.sm }}>
+            {repechage.map((p) => (
+              <View key={p.uid} style={styles.memberRow}>
+                <View style={[styles.seedBadge, { backgroundColor: palette.textFaint }]}>
+                  <Text variant="caption" color={palette.black}>{p.seed}</Text>
+                </View>
+                <Avatar name={p.displayName ?? "?"} size={30} />
+                <Text variant="bodyMed" style={{ flex: 1 }} numberOfLines={1}>
+                  {p.displayName ?? "Participante"}
+                </Text>
+                <Text variant="caption" color={palette.textFaint}>Grupo {p.groupId}</Text>
+              </View>
+            ))}
+          </Card>
+        </View>
+      )}
+
+      {groups && groups.length > 0 && (
+        <View style={{ gap: spacing.md }}>
+          <Text variant="label" color={palette.textMuted}>Grupos sorteados (serpentina)</Text>
+          {groups.map((g) => (
+            <Card key={g.id} style={{ gap: spacing.sm }}>
+              <Text variant="subtitle">Grupo {g.id}</Text>
+              {g.members.map((m) => (
+                <View key={m.uid} style={styles.memberRow}>
+                  <View style={styles.seedBadge}>
+                    <Text variant="caption" color={palette.black}>{m.seed}</Text>
+                  </View>
+                  <Avatar name={m.displayName ?? "?"} size={30} />
+                  <Text variant="bodyMed" style={{ flex: 1 }} numberOfLines={1}>
+                    {m.displayName ?? "Participante"}
+                  </Text>
+                </View>
+              ))}
+            </Card>
+          ))}
+        </View>
+      )}
+
+      <View style={{ gap: spacing.sm }}>
+        <Text variant="label" color={palette.textMuted}>Seeds (resultado da Qualificatória)</Text>
+        <Card style={{ gap: spacing.sm }}>
+          {seeds.map((s) => (
+            <View key={s.uid} style={styles.memberRow}>
+              <View style={styles.seedBadge}>
+                <Text variant="caption" color={palette.black}>{s.seed}</Text>
+              </View>
+              <Avatar name={s.displayName ?? "?"} size={30} />
+              <Text variant="bodyMed" style={{ flex: 1 }} numberOfLines={1}>
+                {s.displayName ?? "Participante"}
+              </Text>
+              <Text variant="caption" color={palette.textMuted}>{s.points} pts</Text>
+            </View>
+          ))}
+        </Card>
+      </View>
+    </>
+  );
+}
+
+function MatchupCard({ matchup }: { matchup: Matchup }) {
+  const isTriple = matchup.kind === "triple";
+  return (
+    <Card style={{ gap: spacing.sm }}>
+      <View style={styles.matchHead}>
+        <View style={[styles.kindTag, { backgroundColor: isTriple ? palette.cyan : palette.primary }]}>
+          <Text variant="caption" color={palette.black}>{isTriple ? "TRIPLO" : "DUELO"}</Text>
+        </View>
+        <Text variant="caption" color={palette.textMuted}>
+          {isTriple ? "2 de 3 avançam" : "vencedor avança"}
+        </Text>
+      </View>
+      {matchup.players.map((p, i) => (
+        <View key={p.uid}>
+          {i > 0 && (
+            <Text variant="caption" color={palette.textFaint} style={styles.vs}>vs</Text>
+          )}
+          <View style={styles.memberRow}>
+            <View style={styles.seedBadge}>
+              <Text variant="caption" color={palette.black}>{p.seed}</Text>
+            </View>
+            <Avatar name={p.displayName ?? "?"} size={30} />
+            <Text variant="bodyMed" style={{ flex: 1 }} numberOfLines={1}>
+              {p.displayName ?? "Participante"}
+            </Text>
+            <Text variant="caption" color={palette.textFaint}>{p.placement}º · Grupo {p.groupId}</Text>
+          </View>
+        </View>
+      ))}
+    </Card>
+  );
+}
+
+function FormatGuide() {
+  return (
+    <>
+      <Card style={styles.banner}>
+        <Ionicons name="construct-outline" size={20} color={palette.primary} />
+        <View style={{ flex: 1 }}>
+          <Text variant="bodyMed">Torneio ainda não iniciado</Text>
+          <Text variant="caption" color={palette.textMuted}>
+            O chaveamento aparece aqui quando a Qualificatória terminar e os Seeds forem definidos.
+          </Text>
+        </View>
+      </Card>
+
+      <View style={styles.note}>
+        <Ionicons name="information-circle-outline" size={15} color={palette.textMuted} />
+        <Text variant="caption" color={palette.textMuted}>Os pontos são zerados ao fim de cada fase.</Text>
+      </View>
+
+      {PHASES.map((p, i) => (
+        <Card key={p.name} style={styles.phase}>
+          <View style={styles.phaseTop}>
+            <View style={styles.phaseIcon}>
+              <Ionicons name={p.icon} size={18} color={palette.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text variant="subtitle">{p.name}</Text>
+              <Text variant="caption" color={palette.textMuted}>{p.summary}</Text>
+            </View>
+          </View>
+          <View style={styles.rules}>
+            {p.rules.map((r) => (
+              <View key={r} style={styles.ruleRow}>
+                <View style={styles.bullet} />
+                <Text variant="caption" color={palette.textMuted} style={{ flex: 1 }}>{r}</Text>
+              </View>
+            ))}
+          </View>
+          {i < PHASES.length - 1 && (
+            <Ionicons name="chevron-down" size={16} color={palette.textFaint}
+              style={{ alignSelf: "center", marginTop: spacing.sm }} />
+          )}
+        </Card>
+      ))}
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   header: { paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.lg, gap: 2 },
   body: { paddingHorizontal: spacing.xl, gap: spacing.md, flexGrow: 1 },
+  phaseChip: {
+    flexDirection: "row", alignItems: "center", gap: spacing.xs,
+    alignSelf: "flex-start", backgroundColor: palette.primaryGlow,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radius.pill,
+  },
+  memberRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  seedBadge: {
+    width: 22, height: 22, borderRadius: 11, backgroundColor: palette.primary,
+    alignItems: "center", justifyContent: "center",
+  },
+  winnerCard: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  matchHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  kindTag: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.sm },
+  vs: { marginLeft: 30 + spacing.sm, marginVertical: 2 },
   banner: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   note: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.xs },
   phase: { gap: spacing.md },

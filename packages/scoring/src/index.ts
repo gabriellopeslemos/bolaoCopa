@@ -168,3 +168,6 @@ export function maxPossiblePoints(
   if (!isValidScore(bet)) return 0;
   return calculatePoints(bet, bet, config).total;
 }
+
+/* Mata-mata — fundação do motor de torneio. */
+export * from "./tournament";

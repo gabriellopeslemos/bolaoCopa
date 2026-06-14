@@ -18,6 +18,12 @@ import { logger } from "firebase-functions/v2";
 import { fetchWorldCupEvents } from "./sportsDb";
 import { scoreMatch } from "./scoreMatch";
 import { sendBetReminders } from "./reminders";
+import {
+  progressQualifierAllGroups,
+  progressGroupsToKnockoutAllGroups,
+  progressKnockoutAllGroups,
+} from "./tournament";
+import { matchTournamentPhase } from "@bolao/scoring";
 import type { MatchDoc } from "./types";
 
 initializeApp();
@@ -128,6 +134,22 @@ export const onMatchWrite = onDocumentWritten("matches/{matchId}", async (event)
 
   if (!becameFinished) return;
   await scoreMatch(event.params.matchId);
+
+  // Avança o torneio quando a fase correspondente termina (só conclui quando
+  // TODOS os jogos daquela fase estiverem encerrados).
+  const phase = matchTournamentPhase(after.round);
+  if (phase === "qualifier") await progressQualifierAllGroups();
+  else if (phase === "groups") await progressGroupsToKnockoutAllGroups();
+  else if (phase === "knockout") await progressKnockoutAllGroups();
+});
+
+/** Avança o torneio sob demanda (apenas admin) — útil para testes. */
+export const progressTournamentNow = onCall(async (req) => {
+  await assertAdmin(req.auth?.uid);
+  const qualifier = await progressQualifierAllGroups();
+  const toKnockout = await progressGroupsToKnockoutAllGroups();
+  const knockoutRounds = await progressKnockoutAllGroups();
+  return { qualifier, toKnockout, knockoutRounds };
 });
 
 /** Entrar em um grupo via código de convite. */

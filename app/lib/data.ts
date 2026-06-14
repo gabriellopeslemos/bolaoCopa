@@ -18,7 +18,7 @@ import {
   useQuery, useMutation, useQueryClient,
 } from "@tanstack/react-query";
 import { db, fns } from "./firebase";
-import type { Group, Match, Member, Bet, GroupSummary, Score } from "./types";
+import type { Group, Match, Member, Bet, GroupSummary, Score, TournamentState } from "./types";
 
 /* ------------------------------------------------------------------ */
 /* Grupos                                                              */
@@ -154,6 +154,18 @@ export function useMatches() {
     queryFn: async () => {
       const snap = await getDocs(query(collection(db, "matches"), orderBy("kickoff", "asc")));
       return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Match, "id">) }));
+    },
+  });
+}
+
+/** Estado do mata-mata do grupo (seeds, grupos sorteados, fase). */
+export function useTournament(groupId: string | undefined) {
+  return useQuery<TournamentState | null>({
+    queryKey: ["tournament", groupId],
+    enabled: !!groupId,
+    queryFn: async () => {
+      const snap = await getDoc(doc(db, "groups", groupId!, "tournament", "state"));
+      return snap.exists() ? (snap.data() as TournamentState) : null;
     },
   });
 }

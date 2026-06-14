@@ -7,7 +7,9 @@
  * partida não duplica pontos.
  */
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
-import { calculatePoints, DEFAULT_SCORING_CONFIG, Score, ScoringConfig } from "@bolao/scoring";
+import {
+  calculatePoints, DEFAULT_SCORING_CONFIG, Score, ScoringConfig, matchTournamentPhase,
+} from "@bolao/scoring";
 import { logger } from "firebase-functions/v2";
 import type { GroupDoc, MatchDoc } from "./types";
 
@@ -30,6 +32,9 @@ export async function scoreMatch(matchId: string): Promise<{ updated: number }> 
     return { updated: 0 };
   }
   const result: Score = match.score;
+  // Fase do mata-mata que este jogo alimenta — usada para o bucket de pontos
+  // por fase (os pontos "zeram" a cada fase pois cada fase tem seu próprio bucket).
+  const matchPhase = matchTournamentPhase(match.round);
 
   // Todos os palpites desta partida (em qualquer grupo).
   const betsSnap = await db
@@ -80,7 +85,11 @@ export async function scoreMatch(matchId: string): Promise<{ updated: number }> 
         scoredAt: FieldValue.serverTimestamp(),
       });
       const memberUpdate: Record<string, unknown> = {};
-      if (delta !== 0) memberUpdate.totalPoints = FieldValue.increment(delta);
+      if (delta !== 0) {
+        memberUpdate.totalPoints = FieldValue.increment(delta);
+        // Bucket por fase (deep-merge): phasePoints[matchPhase] += delta.
+        memberUpdate.phasePoints = { [matchPhase]: FieldValue.increment(delta) };
+      }
       if (firstTime && computed.exact) memberUpdate.exactCount = FieldValue.increment(1);
       if (firstTime && computed.correctOutcome) memberUpdate.correctCount = FieldValue.increment(1);
       if (Object.keys(memberUpdate).length > 0) {

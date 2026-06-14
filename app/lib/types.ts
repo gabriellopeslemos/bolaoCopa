@@ -2,6 +2,11 @@ import type { Timestamp } from "firebase/firestore";
 import type { Score, PointsBreakdown, ScoringConfig } from "@bolao/scoring";
 
 export type { Score, PointsBreakdown, ScoringConfig };
+export type {
+  TournamentState, TournamentPhase, Seeded, DrawGroup,
+  QualifiedParticipant, Matchup, KnockoutRound,
+} from "@bolao/scoring";
+import type { TournamentPhase } from "@bolao/scoring";
 
 export type MatchStatus = "scheduled" | "live" | "finished";
 
@@ -38,6 +43,8 @@ export interface Member {
   displayName: string;
   role: "owner" | "member";
   totalPoints: number;
+  /** Pontos por fase do mata-mata (os pontos "zeram" a cada fase). */
+  phasePoints?: Partial<Record<TournamentPhase, number>>;
   exactCount?: number;
   correctCount?: number;
   joinedAt?: Timestamp;

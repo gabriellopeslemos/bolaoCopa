@@ -69,6 +69,13 @@ service cloud.firestore {
         allow update: if false;
       }
 
+      // Estado do mata-mata (seeds, grupos sorteados, fase). Calculado pelas
+      // Cloud Functions (Admin SDK); cliente só lê.
+      match /tournament/{docId} {
+        allow read: if isMember(groupId);
+        allow write: if false;
+      }
+
       // Palpites do grupo
       match /bets/{betId} {
         // O próprio palpite é sempre legível. O palpite dos outros só fica

@@ -6,13 +6,13 @@ import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/hooks/useAuth";
 import { useActiveGroup } from "@/hooks/useActiveGroup";
-import { useGroup, useMembers } from "@/lib/data";
+import { useGroup, useMembers, useTournament } from "@/lib/data";
 import {
   Screen, Text, Card, Avatar, EmptyState, SkeletonCard, FadeIn, Button,
 } from "@/components/ui";
 import { ScoringRulesCard } from "@/components/ScoringRulesCard";
 import { palette, spacing, radius } from "@/lib/theme";
-import type { Member } from "@/lib/types";
+import type { Member, TournamentPhase } from "@/lib/types";
 
 const DIVISION_SIZE = 4;
 
@@ -36,6 +36,7 @@ export default function RankingScreen() {
 
   const group = useGroup(activeGroupId);
   const members = useMembers(activeGroupId);
+  const tournament = useTournament(activeGroupId);
 
   async function shareInvite() {
     if (!group.data) return;
@@ -62,13 +63,33 @@ export default function RankingScreen() {
     );
   }
 
-  const sections = toDivisions(members.data ?? []);
+  // Pontos da FASE ATUAL (os pontos zeram a cada fase → cada fase tem seu bucket).
+  const currentPhase: TournamentPhase = tournament.data?.phase ?? "qualifier";
+  const pointsOf = (m: Member) => m.phasePoints?.[currentPhase] ?? 0;
+
+  const ranked = [...(members.data ?? [])].sort((a, b) => pointsOf(b) - pointsOf(a));
+
+  // Se o torneio já sorteou os grupos (serpentina), usa-os como divisões reais;
+  // senão, particiona o ranking por pontos (fallback antes da Qualificatória).
+  const drawn = tournament.data?.groups;
+  const memberById = new Map(ranked.map((m) => [m.id, m]));
+  const sections = drawn && drawn.length
+    ? drawn.map((g) => ({
+        title: `Grupo ${g.id}`,
+        data: g.members
+          .map((s) => memberById.get(s.uid))
+          .filter((m): m is Member => !!m)
+          .sort((a, b) => pointsOf(b) - pointsOf(a)),
+      }))
+    : toDivisions(ranked);
 
   return (
     <Screen edges={{ top: true }}>
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
-          <Text variant="caption" color={palette.textMuted}>Ranking · fase de grupos</Text>
+          <Text variant="caption" color={palette.textMuted}>
+            {drawn?.length ? "Ranking · grupos sorteados" : "Ranking · fase de grupos"}
+          </Text>
           <Text variant="title" numberOfLines={1}>{activeGroup?.name ?? group.data?.name ?? " "}</Text>
         </View>
         {group.data && (
@@ -109,7 +130,7 @@ export default function RankingScreen() {
           )}
           renderItem={({ item, index }) => (
             <FadeIn delay={index * 30}>
-              <RankRow member={item} position={index + 1} isMe={item.id === user?.uid} />
+              <RankRow member={item} points={pointsOf(item)} position={index + 1} isMe={item.id === user?.uid} />
             </FadeIn>
           )}
           SectionSeparatorComponent={() => <View style={{ height: spacing.xs }} />}
@@ -123,7 +144,9 @@ export default function RankingScreen() {
 const MEDAL: Record<number, string> = { 1: palette.gold, 2: palette.silver, 3: palette.bronze };
 
 /** position = colocação DENTRO da divisão (1..4). O 4º é a "lanterna". */
-function RankRow({ member, position, isMe }: { member: Member; position: number; isMe: boolean }) {
+function RankRow({
+  member, points, position, isMe,
+}: { member: Member; points: number; position: number; isMe: boolean }) {
   const medal = MEDAL[position];
   const last = position === DIVISION_SIZE;
   return (
@@ -146,7 +169,7 @@ function RankRow({ member, position, isMe }: { member: Member; position: number;
       </View>
       <View style={styles.rankPts}>
         <Text variant="heading" color={position <= 3 ? palette.primary : palette.text}>
-          {member.totalPoints}
+          {points}
         </Text>
         <Text variant="caption" color={palette.textMuted}>pts</Text>
       </View>
