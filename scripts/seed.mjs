@@ -1,8 +1,8 @@
 /**
  * Popula partidas de demonstração da Copa do Mundo.
  *
- * Uso (contra o emulador):
- *   FIRESTORE_EMULATOR_HOST=localhost:8080 GOOGLE_CLOUD_PROJECT=demo-bolaocopa node scripts/seed.mjs
+ * Uso (contra o emulador) — use 127.0.0.1 e o mesmo project id do app (bolaocopa-22280):
+ *   FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GOOGLE_CLOUD_PROJECT=bolaocopa-22280 node scripts/seed.mjs
  *
  * Uso (projeto real — precisa de credenciais de admin):
  *   GOOGLE_APPLICATION_CREDENTIALS=./serviceAccount.json node scripts/seed.mjs

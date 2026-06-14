@@ -53,13 +53,26 @@ export const db = getFirestore(app);
 export const fns = getFunctions(app, "us-central1");
 
 // Conecta nos emuladores quando EXPO_PUBLIC_USE_EMULATOR=1 (desenvolvimento local).
+// Usa 127.0.0.1 por padrão: no Windows "localhost" pode resolver para IPv6 (::1),
+// enquanto os emuladores do Firebase escutam apenas em IPv4 (127.0.0.1).
 if (process.env.EXPO_PUBLIC_USE_EMULATOR === "1") {
-  const host = process.env.EXPO_PUBLIC_EMULATOR_HOST ?? "localhost";
+  const host = process.env.EXPO_PUBLIC_EMULATOR_HOST ?? "127.0.0.1";
+  // Cada conexão é independente: se um emulador não estiver no ar (ex.: subiu
+  // apenas o firestore), os demais continuam funcionando em vez de tudo falhar.
   try {
     connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
-    connectFirestoreEmulator(db, host, 8080);
-    connectFunctionsEmulator(fns, host, 5001);
-  } catch {
-    // Ignora reconexões no hot-reload.
+  } catch (e) {
+    console.warn("[firebase] Auth emulator não conectado:", e);
   }
+  try {
+    connectFirestoreEmulator(db, host, 8080);
+  } catch (e) {
+    console.warn("[firebase] Firestore emulator não conectado:", e);
+  }
+  try {
+    connectFunctionsEmulator(fns, host, 5001);
+  } catch (e) {
+    console.warn("[firebase] Functions emulator não conectado:", e);
+  }
+  console.info(`[firebase] Emuladores ativos em ${host} (auth:9099, firestore:8080, functions:5001)`);
 }

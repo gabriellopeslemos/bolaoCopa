@@ -112,26 +112,34 @@ npm run test:rules
 
 ### 4b. Popular jogos de demonstração (opcional)
 
-# Suba o emulador em outro terminal: firebase emulators:start --only firestore
+Suba os emuladores em outro terminal. Para rodar o app você precisa de **auth + firestore + functions** (não só firestore):
 
-# bash / macOS / Linux:
 ```bash
-FIRESTORE_EMULATOR_HOST=localhost:8080 GOOGLE_CLOUD_PROJECT=demo-bolaocopa \
-  node scripts/seed.mjs
+firebase emulators:start --only auth,firestore,functions
 ```
 
-# PowerShell (Windows):
+Depois, popule os jogos. Use `127.0.0.1` (não `localhost`) e o **mesmo project id do app** (`bolaocopa-22280`),
+senão os dados caem num namespace diferente e o app não os enxerga:
+
 ```powershell
-$env:FIRESTORE_EMULATOR_HOST="localhost:8080"; $env:GOOGLE_CLOUD_PROJECT="demo-bolaocopa"; node scripts/seed.mjs
+# PowerShell:
+$env:FIRESTORE_EMULATOR_HOST="127.0.0.1:8080"; $env:GOOGLE_CLOUD_PROJECT="bolaocopa-22280"; node scripts/seed.mjs
 ```
+
+Confira os dados no Emulator UI: http://127.0.0.1:4000/firestore
 
 ### 5. Rodar o app em desenvolvimento
 
 ```bash
 cd app
-npm start
-# Escaneie o QR code com o Expo Go no celular
+npm start            # ou: npx expo start -c  (limpa o cache do bundler)
+
+# Escaneie o QR code com o Expo Go, ou tecle "w" para abrir no navegador
 ```
+
+> O app conecta nos emuladores quando `EXPO_PUBLIC_USE_EMULATOR=1` está no `app/.env`.
+> As variáveis `EXPO_PUBLIC_*` são fixadas no bundle quando o dev server sobe — se alterar o `.env`,
+> reinicie com `npx expo start -c`.
 
 ### 6. Fazer deploy das regras e functions
 
