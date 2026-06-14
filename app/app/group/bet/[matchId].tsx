@@ -9,7 +9,7 @@ import { Screen, Text, Card, Button } from "@/components/ui";
 import { ScoreStepper } from "@/components/ScoreStepper";
 import { ScoringRulesCard } from "@/components/ScoringRulesCard";
 import { palette, spacing, radius } from "@/lib/theme";
-import { formatKickoff } from "@/lib/format";
+import { formatKickoff, isBettingOpen } from "@/lib/format";
 import { maxPossiblePoints, type Score } from "@bolao/scoring";
 
 export default function BetScreen() {
@@ -29,7 +29,7 @@ export default function BetScreen() {
     if (existing) setScore(existing.score);
   }, [existing]);
 
-  const closed = match.data && match.data.status !== "scheduled";
+  const closed = !!match.data && !isBettingOpen(match.data);
   const potential = maxPossiblePoints(score);
 
   async function save() {
@@ -53,7 +53,7 @@ export default function BetScreen() {
       <Screen style={styles.center}>
         <Text variant="heading" center>Palpites encerrados</Text>
         <Text variant="body" color={palette.textMuted} center style={{ marginTop: spacing.xs }}>
-          Esta partida já começou.
+          Os palpites fecham 5 minutos antes do início da partida.
         </Text>
         <Button title="Ver palpites" onPress={() => router.replace(`/group/match/${matchId}?groupId=${groupId}`)}
           style={{ marginTop: spacing.lg }} />

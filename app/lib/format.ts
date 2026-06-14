@@ -31,3 +31,18 @@ export const STATUS_META: Record<string, { label: string; color: string }> = {
   live: { label: "AO VIVO", color: "#EF4444" },
   finished: { label: "Encerrado", color: "#7FA593" },
 };
+
+/** Antecedência com que os palpites fecham antes do início do jogo (5 min). */
+export const BET_LOCK_LEAD_MS = 5 * 60 * 1000;
+
+/**
+ * Apostas abertas: jogo agendado e faltando MAIS de 5 min para o início.
+ * Espelha a função `matchIsOpen` das regras do Firestore. Quando esta função
+ * retorna `false`, os palpites estão bloqueados e os de todos ficam visíveis.
+ */
+export function isBettingOpen(match: { status: string; kickoff?: Timestamp | null }): boolean {
+  if (match.status !== "scheduled") return false;
+  const d = toDate(match.kickoff);
+  if (!d) return false;
+  return d.getTime() - Date.now() > BET_LOCK_LEAD_MS;
+}

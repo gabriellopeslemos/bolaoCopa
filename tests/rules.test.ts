@@ -12,7 +12,7 @@ import {
 } from "@firebase/rules-unit-testing";
 import {
   doc, setDoc, getDoc, collection, getDocs,
-  writeBatch, Timestamp,
+  writeBatch, Timestamp, query, where,
 } from "firebase/firestore";
 import { beforeAll, afterAll, beforeEach, describe, it } from "vitest";
 
@@ -21,8 +21,9 @@ let env: RulesTestEnvironment;
 const ALICE = "alice";
 const BOB = "bob";
 const GROUP = "g1";
-const FUTURE_MATCH = "m_future";
-const PAST_MATCH = "m_past";
+const FUTURE_MATCH = "m_future"; // começa amanhã (apostas abertas)
+const SOON_MATCH = "m_soon";     // começa em 2 min (apostas já fechadas pelo corte de 5 min)
+const PAST_MATCH = "m_past";     // já terminou
 
 beforeAll(async () => {
   env = await initializeTestEnvironment({
@@ -56,10 +57,25 @@ beforeEach(async () => {
       kickoff: Timestamp.fromDate(new Date(Date.now() + 86_400_000)),
       status: "scheduled", score: null,
     });
+    await setDoc(doc(db, "matches", SOON_MATCH), {
+      competitionId: "wc", home: { name: "ESP" }, away: { name: "POR" },
+      kickoff: Timestamp.fromDate(new Date(Date.now() + 2 * 60_000)),
+      status: "scheduled", score: null,
+    });
     await setDoc(doc(db, "matches", PAST_MATCH), {
       competitionId: "wc", home: { name: "FRA" }, away: { name: "GER" },
       kickoff: Timestamp.fromDate(new Date(Date.now() - 86_400_000)),
       status: "finished", score: { home: 2, away: 1 },
+    });
+    // Palpites já existentes (semeados pelo admin) para testar a visibilidade.
+    await setDoc(doc(db, "groups", GROUP, "bets", `${ALICE}_${FUTURE_MATCH}`), {
+      userId: ALICE, matchId: FUTURE_MATCH, score: { home: 2, away: 1 }, points: 0,
+    });
+    await setDoc(doc(db, "groups", GROUP, "bets", `${ALICE}_${PAST_MATCH}`), {
+      userId: ALICE, matchId: PAST_MATCH, score: { home: 0, away: 0 }, points: 0,
+    });
+    await setDoc(doc(db, "groups", GROUP, "bets", `${BOB}_${FUTURE_MATCH}`), {
+      userId: BOB, matchId: FUTURE_MATCH, score: { home: 1, away: 1 }, points: 0,
     });
   });
 });
@@ -138,6 +154,14 @@ describe("Palpites", () => {
     );
   });
 
+  it("não pode palpitar a menos de 5 min do início (feature 2)", async () => {
+    await assertFails(
+      setDoc(doc(db(BOB), "groups", GROUP, "bets", `${BOB}_${SOON_MATCH}`), {
+        userId: BOB, matchId: SOON_MATCH, score: { home: 1, away: 0 }, points: 0,
+      })
+    );
+  });
+
   it("não pode enviar palpite já com pontos", async () => {
     await assertFails(
       setDoc(doc(db(BOB), "groups", GROUP, "bets", `${BOB}_${FUTURE_MATCH}`), {
@@ -154,8 +178,25 @@ describe("Palpites", () => {
     );
   });
 
-  it("membro lê os palpites do grupo", async () => {
-    await assertSucceeds(getDocs(collection(db(ALICE), "groups", GROUP, "bets")));
+  it("membro lê sempre o próprio palpite, mesmo com apostas abertas", async () => {
+    await assertSucceeds(getDoc(doc(db(BOB), "groups", GROUP, "bets", `${BOB}_${FUTURE_MATCH}`)));
+  });
+
+  it("não vê o palpite de outro enquanto as apostas estão abertas (feature 4)", async () => {
+    await assertFails(getDoc(doc(db(BOB), "groups", GROUP, "bets", `${ALICE}_${FUTURE_MATCH}`)));
+  });
+
+  it("vê o palpite de outro quando as apostas fecharam (feature 4)", async () => {
+    await assertSucceeds(getDoc(doc(db(BOB), "groups", GROUP, "bets", `${ALICE}_${PAST_MATCH}`)));
+  });
+
+  it("consulta por matchId revela todos quando o jogo já fechou", async () => {
+    await assertSucceeds(
+      getDocs(query(
+        collection(db(BOB), "groups", GROUP, "bets"),
+        where("matchId", "==", PAST_MATCH)
+      ))
+    );
   });
 });
 

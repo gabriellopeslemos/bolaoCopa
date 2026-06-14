@@ -4,7 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Text } from "./ui/Text";
 import { TeamCrest } from "./TeamCrest";
 import { palette, radius, spacing } from "@/lib/theme";
-import { formatKickoff, STATUS_META } from "@/lib/format";
+import { formatKickoff, STATUS_META, isBettingOpen } from "@/lib/format";
 import type { Match, Bet } from "@/lib/types";
 
 interface Props {
@@ -16,7 +16,9 @@ interface Props {
 export function MatchCard({ match, bet, onPress }: Props) {
   const status = STATUS_META[match.status] ?? STATUS_META.scheduled;
   const live = match.status === "live";
-  const canBet = match.status === "scheduled";
+  const canBet = isBettingOpen(match);
+  // Agendado mas dentro dos 5 min finais: apostas já fecharam.
+  const statusLabel = match.status === "scheduled" && !canBet ? "Fechado" : status.label;
 
   return (
     <Pressable
@@ -28,7 +30,7 @@ export function MatchCard({ match, bet, onPress }: Props) {
           {match.round || "Partida"}
         </Text>
         <View style={[styles.statusDot, { backgroundColor: live ? palette.red : "transparent" }]} />
-        <Text variant="caption" color={status.color}>{status.label}</Text>
+        <Text variant="caption" color={status.color}>{statusLabel}</Text>
       </View>
 
       <View style={styles.teams}>

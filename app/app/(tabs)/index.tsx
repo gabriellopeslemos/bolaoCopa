@@ -1,208 +1,175 @@
-import React, { useState } from "react";
-import {
-  View, FlatList, StyleSheet, Modal, Pressable,
-  KeyboardAvoidingView, Platform, RefreshControl,
-} from "react-native";
+import React from "react";
+import { View, SectionList, StyleSheet, Pressable, Share, RefreshControl } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/hooks/useAuth";
-import { useMyGroups, useCreateGroup, useJoinGroup } from "@/lib/data";
+import { useActiveGroup } from "@/hooks/useActiveGroup";
+import { useGroup, useMembers } from "@/lib/data";
 import {
-  Screen, Text, Button, Card, Input, EmptyState, SkeletonCard, FadeIn,
+  Screen, Text, Card, Avatar, EmptyState, SkeletonCard, FadeIn, Button,
 } from "@/components/ui";
+import { ScoringRulesCard } from "@/components/ScoringRulesCard";
 import { palette, spacing, radius } from "@/lib/theme";
-import type { GroupSummary } from "@/lib/types";
+import type { Member } from "@/lib/types";
 
-export default function GroupsScreen() {
-  const { user } = useAuth();
-  const router = useRouter();
+const DIVISION_SIZE = 4;
+
+/** Quebra o ranking (já ordenado por pontos) em divisões de 4, estilo fase de grupos. */
+function toDivisions(members: Member[]): { title: string; data: Member[] }[] {
+  const sections: { title: string; data: Member[] }[] = [];
+  for (let i = 0; i < members.length; i += DIVISION_SIZE) {
+    sections.push({
+      title: `Divisão ${String.fromCharCode(65 + sections.length)}`,
+      data: members.slice(i, i + DIVISION_SIZE),
+    });
+  }
+  return sections;
+}
+
+export default function RankingScreen() {
   const insets = useSafeAreaInsets();
-  const { data: groups, isLoading, refetch, isRefetching } = useMyGroups(user?.uid);
+  const router = useRouter();
+  const { user } = useAuth();
+  const { activeGroupId, activeGroup, isLoading: groupsLoading } = useActiveGroup();
 
-  const [sheet, setSheet] = useState<null | "create" | "join">(null);
+  const group = useGroup(activeGroupId);
+  const members = useMembers(activeGroupId);
+
+  async function shareInvite() {
+    if (!group.data) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    await Share.share({
+      message: `Entre no meu bolão "${group.data.name}" no Bolão Copa!\nCódigo de convite: ${group.data.inviteCode}`,
+    });
+  }
+
+  // Nenhum grupo: orienta a criar/entrar no Perfil.
+  if (!groupsLoading && !activeGroupId) {
+    return (
+      <Screen edges={{ top: true }}>
+        <View style={styles.header}><Text variant="title">Ranking</Text></View>
+        <EmptyState
+          icon="people-outline"
+          title="Nenhum grupo selecionado"
+          subtitle="Crie um bolão ou entre em um com o código de convite, lá no Perfil."
+        >
+          <Button title="Ir para o Perfil" icon="person-outline"
+            onPress={() => router.push("/(tabs)/profile")} />
+        </EmptyState>
+      </Screen>
+    );
+  }
+
+  const sections = toDivisions(members.data ?? []);
 
   return (
     <Screen edges={{ top: true }}>
       <View style={styles.header}>
-        <View>
-          <Text variant="caption" color={palette.textMuted}>Olá,</Text>
-          <Text variant="title">{user?.displayName?.split(" ")[0] ?? "jogador"} 👋</Text>
+        <View style={{ flex: 1 }}>
+          <Text variant="caption" color={palette.textMuted}>Ranking · fase de grupos</Text>
+          <Text variant="title" numberOfLines={1}>{activeGroup?.name ?? group.data?.name ?? " "}</Text>
         </View>
-        <Pressable style={styles.iconBtn} onPress={() => router.push("/(tabs)/profile")}>
-          <Ionicons name="person-circle-outline" size={28} color={palette.textMuted} />
-        </Pressable>
+        {group.data && (
+          <Pressable onPress={shareInvite} hitSlop={10} style={styles.inviteBtn}>
+            <Ionicons name="share-social-outline" size={16} color={palette.primary} />
+            <Text variant="label" color={palette.primary}>{group.data.inviteCode}</Text>
+          </Pressable>
+        )}
       </View>
 
-      {isLoading ? (
-        <View style={styles.list}>
-          {[0, 1, 2].map((i) => <SkeletonCard key={i} />)}
-        </View>
+      {members.isLoading ? (
+        <View style={styles.list}>{[0, 1, 2].map((i) => <SkeletonCard key={i} />)}</View>
       ) : (
-        <FlatList
-          data={groups ?? []}
-          keyExtractor={(g) => g.id}
-          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 160 }]}
+        <SectionList
+          sections={sections}
+          keyExtractor={(m) => m.id}
+          stickySectionHeadersEnabled={false}
+          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + spacing.xl }]}
           refreshControl={
-            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={palette.primary} />
+            <RefreshControl refreshing={members.isRefetching} onRefresh={members.refetch} tintColor={palette.primary} />
           }
           ListEmptyComponent={
-            <EmptyState
-              icon="people-outline"
-              title="Nenhum grupo ainda"
-              subtitle="Crie um bolão e convide a galera, ou entre em um grupo com o código de convite."
-            />
+            <EmptyState icon="podium-outline" title="Ranking vazio" subtitle="Faça palpites para pontuar." />
           }
+          ListFooterComponent={
+            sections.length > 0 ? (
+              <View style={{ marginTop: spacing.lg, gap: spacing.sm }}>
+                <Text variant="label" color={palette.textMuted}>Como pontua</Text>
+                <ScoringRulesCard />
+              </View>
+            ) : null
+          }
+          renderSectionHeader={({ section }) => (
+            <View style={styles.divHeader}>
+              <Ionicons name="grid-outline" size={14} color={palette.primary} />
+              <Text variant="label" color={palette.primary}>{section.title}</Text>
+            </View>
+          )}
           renderItem={({ item, index }) => (
-            <FadeIn delay={index * 60}>
-              <GroupCard group={item} onPress={() => router.push(`/group/${item.id}`)} />
+            <FadeIn delay={index * 30}>
+              <RankRow member={item} position={index + 1} isMe={item.id === user?.uid} />
             </FadeIn>
           )}
+          SectionSeparatorComponent={() => <View style={{ height: spacing.xs }} />}
+          ItemSeparatorComponent={() => <View style={{ height: spacing.md }} />}
         />
       )}
-
-      <View style={[styles.actions, { paddingBottom: insets.bottom + spacing.md }]}>
-        <Button title="Entrar com código" variant="secondary" icon="enter-outline"
-          onPress={() => setSheet("join")} style={{ flex: 1 }} />
-        <Button title="Criar bolão" icon="add" onPress={() => setSheet("create")} style={{ flex: 1 }} />
-      </View>
-
-      <GroupSheet
-        mode={sheet}
-        onClose={() => setSheet(null)}
-        onCreated={(id) => { setSheet(null); router.push(`/group/${id}`); }}
-      />
     </Screen>
   );
 }
 
-function GroupCard({ group, onPress }: { group: GroupSummary; onPress: () => void }) {
+const MEDAL: Record<number, string> = { 1: palette.gold, 2: palette.silver, 3: palette.bronze };
+
+/** position = colocação DENTRO da divisão (1..4). O 4º é a "lanterna". */
+function RankRow({ member, position, isMe }: { member: Member; position: number; isMe: boolean }) {
+  const medal = MEDAL[position];
+  const last = position === DIVISION_SIZE;
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => pressed && { opacity: 0.7 }}>
-      <Card style={styles.groupCard}>
-        <View style={styles.groupIcon}>
-          <Ionicons name="trophy" size={22} color={palette.primary} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text variant="subtitle" numberOfLines={1}>{group.name}</Text>
-          <Text variant="caption" color={palette.textMuted}>
-            {group.memberCount} {group.memberCount === 1 ? "participante" : "participantes"}
-            {group.role === "owner" ? " · você é o dono" : ""}
-          </Text>
-        </View>
-        <View style={styles.groupPts}>
-          <Text variant="heading" color={palette.primary}>{group.totalPoints}</Text>
-          <Text variant="caption" color={palette.textMuted}>pts</Text>
-        </View>
-      </Card>
-    </Pressable>
-  );
-}
-
-function GroupSheet({
-  mode, onClose, onCreated,
-}: { mode: null | "create" | "join"; onClose: () => void; onCreated: (id: string) => void }) {
-  const { user } = useAuth();
-  const insets = useSafeAreaInsets();
-  const create = useCreateGroup();
-  const join = useJoinGroup();
-  const [value, setValue] = useState("");
-  const [error, setError] = useState("");
-
-  const visible = mode !== null;
-  const isCreate = mode === "create";
-
-  React.useEffect(() => {
-    if (visible) { setValue(""); setError(""); }
-  }, [visible, mode]);
-
-  async function submit() {
-    if (!value.trim() || !user) return;
-    setError("");
-    try {
-      if (isCreate) {
-        const id = await create.mutateAsync({
-          uid: user.uid,
-          displayName: user.displayName ?? "Você",
-          name: value.trim(),
-        });
-        onCreated(id);
-      } else {
-        const res = await join.mutateAsync(value.trim());
-        onCreated(res.groupId);
-      }
-    } catch (e) {
-      setError(isCreate
-        ? "Não foi possível criar o grupo."
-        : "Código inválido ou grupo não encontrado.");
-    }
-  }
-
-  const pending = create.isPending || join.isPending;
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + spacing.xl }]}>
-          <View style={styles.handle} />
-          <Text variant="heading">{isCreate ? "Criar bolão" : "Entrar em um grupo"}</Text>
-          <Text variant="body" color={palette.textMuted}>
-            {isCreate
-              ? "Dê um nome ao seu grupo. Você poderá convidar amigos por um código."
-              : "Digite o código de convite que você recebeu."}
-          </Text>
-          <Input
-            icon={isCreate ? "trophy-outline" : "key-outline"}
-            placeholder={isCreate ? "Ex: Bolão da firma" : "Ex: ABC123"}
-            autoCapitalize={isCreate ? "sentences" : "characters"}
-            autoFocus
-            value={value}
-            onChangeText={setValue}
-            error={error}
-            maxLength={isCreate ? 40 : 6}
-            onSubmitEditing={submit}
-          />
-          <Button
-            title={isCreate ? "Criar e abrir" : "Entrar"}
-            onPress={submit}
-            loading={pending}
-            disabled={!value.trim()}
-          />
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
+    <Card highlight={isMe} style={styles.rankRow}>
+      <View style={styles.rankPos}>
+        {medal ? (
+          <Ionicons name="medal" size={22} color={medal} />
+        ) : (
+          <Text variant="subtitle" color={last ? palette.red : palette.textMuted}>{position}</Text>
+        )}
+      </View>
+      <Avatar name={member.displayName} size={42} ring={isMe} />
+      <View style={{ flex: 1 }}>
+        <Text variant="bodyMed" numberOfLines={1}>
+          {member.displayName}{isMe ? " (você)" : ""}
+        </Text>
+        <Text variant="caption" color={palette.textMuted}>
+          {member.exactCount ?? 0} placares exatos · {member.correctCount ?? 0} acertos
+        </Text>
+      </View>
+      <View style={styles.rankPts}>
+        <Text variant="heading" color={position <= 3 ? palette.primary : palette.text}>
+          {member.totalPoints}
+        </Text>
+        <Text variant="caption" color={palette.textMuted}>pts</Text>
+      </View>
+    </Card>
   );
 }
 
 const styles = StyleSheet.create({
   header: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
     paddingHorizontal: spacing.xl, paddingTop: spacing.md, paddingBottom: spacing.lg,
   },
-  iconBtn: { padding: spacing.xs },
-  list: { paddingHorizontal: spacing.xl, gap: spacing.md, flexGrow: 1 },
-  groupCard: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  groupIcon: {
-    width: 46, height: 46, borderRadius: radius.md,
-    backgroundColor: palette.primaryGlow, alignItems: "center", justifyContent: "center",
+  inviteBtn: {
+    flexDirection: "row", alignItems: "center", gap: spacing.xs,
+    backgroundColor: palette.primaryGlow, paddingHorizontal: spacing.md, paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
   },
-  groupPts: { alignItems: "center", minWidth: 44 },
-  actions: {
-    position: "absolute", left: 0, right: 0, bottom: 0,
-    flexDirection: "row", gap: spacing.md,
-    paddingHorizontal: spacing.xl, paddingTop: spacing.md,
-    backgroundColor: palette.bg, borderTopWidth: 1, borderTopColor: palette.border,
+  list: { paddingHorizontal: spacing.xl, flexGrow: 1 },
+  divHeader: {
+    flexDirection: "row", alignItems: "center", gap: spacing.xs,
+    paddingTop: spacing.lg, paddingBottom: spacing.sm,
   },
-  backdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.6)" },
-  sheet: {
-    backgroundColor: palette.bgElevated,
-    borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl,
-    padding: spacing.xl, gap: spacing.md,
-    borderTopWidth: 1, borderColor: palette.border,
-  },
-  handle: {
-    width: 40, height: 4, borderRadius: 2, backgroundColor: palette.border,
-    alignSelf: "center", marginBottom: spacing.sm,
-  },
+  rankRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  rankPos: { width: 28, alignItems: "center" },
+  rankPts: { alignItems: "center", minWidth: 40 },
 });

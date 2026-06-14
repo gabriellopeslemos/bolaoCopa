@@ -19,6 +19,8 @@ export interface MatchDoc {
   status: MatchStatus;
   score: Score | null;
   updatedAt?: Timestamp;
+  // Marca quando os lembretes (~2h antes) já foram enviados, para não repetir.
+  remindersSentAt?: Timestamp;
 }
 
 export interface GroupDoc {

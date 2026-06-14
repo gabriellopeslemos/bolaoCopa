@@ -11,6 +11,7 @@ import {
   Inter_700Bold, Inter_800ExtraBold,
 } from "@expo-google-fonts/inter";
 import { useAuth } from "@/hooks/useAuth";
+import { usePushToken } from "@/hooks/usePushToken";
 import { palette } from "@/lib/theme";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -23,6 +24,8 @@ function AuthGate() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const segments = useSegments();
+
+  usePushToken(user?.uid);
 
   useEffect(() => {
     if (loading) return;
@@ -45,7 +48,6 @@ function AuthGate() {
     >
       <Stack.Screen name="(auth)" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="group/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="group/bet/[matchId]" options={{ title: "Fazer palpite", presentation: "card" }} />
       <Stack.Screen name="group/match/[matchId]" options={{ title: "Partida" }} />
       <Stack.Screen name="admin" options={{ title: "Administração" }} />

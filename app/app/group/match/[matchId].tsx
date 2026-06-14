@@ -9,7 +9,7 @@ import { Screen, Text, Card, Avatar, EmptyState, FadeIn } from "@/components/ui"
 import { PointsPill } from "@/components/PointsBadge";
 import { TeamCrest } from "@/components/TeamCrest";
 import { palette, spacing } from "@/lib/theme";
-import { formatKickoff, STATUS_META } from "@/lib/format";
+import { formatKickoff, STATUS_META, isBettingOpen } from "@/lib/format";
 
 export default function MatchDetailScreen() {
   const { matchId, groupId } = useLocalSearchParams<{ matchId: string; groupId: string }>();
@@ -17,9 +17,12 @@ export default function MatchDetailScreen() {
   const insets = useSafeAreaInsets();
 
   const match = useMatch(matchId);
-  const bets = useMatchBets(groupId, matchId);
   const m = match.data;
   const status = m ? STATUS_META[m.status] : undefined;
+  // Os palpites do grupo só ficam visíveis quando as apostas fecham (5 min
+  // antes do início). Enquanto abertas, nem consultamos (as regras negariam).
+  const revealed = !!m && !isBettingOpen(m);
+  const bets = useMatchBets(groupId, revealed ? matchId : undefined);
 
   return (
     <Screen>
@@ -61,8 +64,13 @@ export default function MatchDetailScreen() {
           </View>
         }
         ListEmptyComponent={
-          <EmptyState icon="people-outline" title="Nenhum palpite"
-            subtitle="Ninguém palpitou nesta partida." />
+          revealed ? (
+            <EmptyState icon="people-outline" title="Nenhum palpite"
+              subtitle="Ninguém palpitou nesta partida." />
+          ) : (
+            <EmptyState icon="lock-closed-outline" title="Palpites ocultos"
+              subtitle="Os palpites de todos ficam visíveis quando as apostas fecharem, 5 minutos antes do início." />
+          )
         }
         renderItem={({ item, index }) => {
           const isMe = item.userId === user?.uid;

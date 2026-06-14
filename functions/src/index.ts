@@ -17,6 +17,7 @@ import { logger } from "firebase-functions/v2";
 
 import { fetchWorldCupEvents } from "./sportsDb";
 import { scoreMatch } from "./scoreMatch";
+import { sendBetReminders } from "./reminders";
 import type { MatchDoc } from "./types";
 
 initializeApp();
@@ -96,6 +97,20 @@ export const setMatchResult = onCall(async (req) => {
     { merge: true }
   );
   return { ok: true };
+});
+
+/** Lembretes de palpite: roda a cada 15 min e avisa quem não palpitou (~2h antes). */
+export const betReminders = onSchedule(
+  { schedule: "every 15 minutes", region: "us-central1" },
+  async () => {
+    await sendBetReminders();
+  }
+);
+
+/** Dispara os lembretes sob demanda (apenas admin) — útil para testes. */
+export const sendRemindersNow = onCall(async (req) => {
+  await assertAdmin(req.auth?.uid);
+  return sendBetReminders();
 });
 
 /** Pontua os palpites quando um jogo é finalizado. */
