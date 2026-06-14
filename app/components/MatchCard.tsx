@@ -4,7 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Text } from "./ui/Text";
 import { TeamCrest } from "./TeamCrest";
 import { palette, radius, spacing } from "@/lib/theme";
-import { formatKickoff, STATUS_META, isBettingOpen } from "@/lib/format";
+import { formatBrasiliaTime, formatCountdown, STATUS_META, isBettingOpen } from "@/lib/format";
 import type { Match, Bet } from "@/lib/types";
 
 interface Props {
@@ -17,8 +17,9 @@ export function MatchCard({ match, bet, onPress }: Props) {
   const status = STATUS_META[match.status] ?? STATUS_META.scheduled;
   const live = match.status === "live";
   const canBet = isBettingOpen(match);
-  // Agendado mas dentro dos 5 min finais: apostas já fecharam.
   const statusLabel = match.status === "scheduled" && !canBet ? "Fechado" : status.label;
+  const brtTime = formatBrasiliaTime(match.kickoff);
+  const countdown = match.status === "scheduled" ? formatCountdown(match.kickoff) : null;
 
   return (
     <Pressable
@@ -43,7 +44,10 @@ export function MatchCard({ match, bet, onPress }: Props) {
           {match.score ? (
             <Text style={styles.score}>{match.score.home}-{match.score.away}</Text>
           ) : (
-            <Text variant="caption" color={palette.textMuted}>{formatKickoff(match.kickoff).split("·")[1]?.trim() || "vs"}</Text>
+            <>
+              <Text variant="bodyMed" color={palette.text}>{brtTime || "vs"}</Text>
+              <Text variant="caption" color={palette.textFaint}>BRT</Text>
+            </>
           )}
         </View>
 
@@ -54,7 +58,12 @@ export function MatchCard({ match, bet, onPress }: Props) {
       </View>
 
       <View style={styles.bottomRow}>
-        <Text variant="caption" color={palette.textFaint}>{formatKickoff(match.kickoff)}</Text>
+        <View style={styles.kickoffInfo}>
+          <Text variant="caption" color={palette.textFaint}>{brtTime} BRT</Text>
+          {countdown && (
+            <Text variant="caption" color={palette.primary}>{countdown}</Text>
+          )}
+        </View>
         {bet ? (
           <View style={styles.betChip}>
             <Ionicons name="checkmark-circle" size={14} color={palette.primary} />
@@ -102,5 +111,6 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     borderTopWidth: 1, borderTopColor: palette.border, paddingTop: spacing.md,
   },
+  kickoffInfo: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   betChip: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
 });
