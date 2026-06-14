@@ -53,6 +53,7 @@ export default function MatchesScreen() {
   const { activeGroupId, activeGroup } = useActiveGroup();
 
   const [selectedDate, setSelectedDate] = useState<Date>(() => getInitialDate(DATES));
+  const [statusFilter, setStatusFilter] = useState<"upcoming" | "finished">("upcoming");
   const scrollRef = useRef<ScrollView>(null);
 
   const { data: matches, isLoading, refetch, isRefetching } = useMatches();
@@ -62,7 +63,9 @@ export default function MatchesScreen() {
     matches?.filter((m) => {
       if (!m.kickoff) return false;
       const d = m.kickoff.toDate();
-      return isSameDay(d, selectedDate);
+      if (!isSameDay(d, selectedDate)) return false;
+      if (statusFilter === "finished") return m.status === "finished";
+      return m.status === "scheduled" || m.status === "live";
     }) ?? [];
 
   // Scroll date picker to selected date on mount
@@ -130,6 +133,36 @@ export default function MatchesScreen() {
         })}
       </ScrollView>
 
+      {/* Status toggle */}
+      <View style={styles.toggleWrapper}>
+        <View style={styles.toggleContainer}>
+          <TouchableOpacity
+            style={[styles.toggleOption, statusFilter === "upcoming" && styles.toggleOptionActive]}
+            onPress={() => setStatusFilter("upcoming")}
+            activeOpacity={0.8}
+          >
+            <Text
+              variant="label"
+              color={statusFilter === "upcoming" ? palette.bg : palette.textMuted}
+            >
+              Próximos
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toggleOption, statusFilter === "finished" && styles.toggleOptionActive]}
+            onPress={() => setStatusFilter("finished")}
+            activeOpacity={0.8}
+          >
+            <Text
+              variant="label"
+              color={statusFilter === "finished" ? palette.bg : palette.textMuted}
+            >
+              Finalizados
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {isLoading ? (
         <View style={styles.list}>{[0, 1, 2, 3].map((i) => <SkeletonCard key={i} />)}</View>
       ) : (
@@ -162,8 +195,12 @@ export default function MatchesScreen() {
           ListEmptyComponent={
             <EmptyState
               icon="football-outline"
-              title="Nenhum jogo neste dia"
-              subtitle="Sem partidas agendadas para esta data. Selecione outro dia."
+              title={statusFilter === "finished" ? "Nenhum jogo finalizado" : "Nenhum jogo agendado"}
+              subtitle={
+                statusFilter === "finished"
+                  ? "Sem partidas encerradas nesta data."
+                  : "Sem partidas agendadas para esta data. Selecione outro dia."
+              }
             />
           }
           renderItem={({ item, index }) => {
@@ -233,6 +270,26 @@ const styles = StyleSheet.create({
   },
   todayDotSelected: {
     backgroundColor: palette.bg,
+  },
+  toggleWrapper: {
+    alignItems: "center",
+    marginBottom: spacing.lg,
+  },
+  toggleContainer: {
+    flexDirection: "row",
+    backgroundColor: palette.surface,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: palette.border,
+    padding: 3,
+  },
+  toggleOption: {
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+  },
+  toggleOptionActive: {
+    backgroundColor: palette.primary,
   },
   list: { paddingHorizontal: spacing.xl, gap: spacing.md, flexGrow: 1 },
   notice: { gap: spacing.sm, marginBottom: spacing.md },
