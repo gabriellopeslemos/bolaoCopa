@@ -117,6 +117,9 @@ export function parseKickoff(ev: SportsDbEvent): Date {
   return new Date(NaN);
 }
 
+// Margem de segurança: 3h cobre 90min + prorrogação + pênaltis + atraso de API.
+const MATCH_MAX_DURATION_MS = 3 * 60 * 60 * 1000;
+
 /** Normaliza um evento bruto; retorna null se for inválido (sem id ou data). */
 export function normalizeEvent(ev: SportsDbEvent): NormalizedFixture | null {
   const externalId = Number.parseInt(ev.idEvent, 10);
@@ -125,7 +128,19 @@ export function normalizeEvent(ev: SportsDbEvent): NormalizedFixture | null {
   const kickoff = parseKickoff(ev);
   if (Number.isNaN(kickoff.getTime())) return null;
 
-  const status = mapStatus(ev.strStatus, ev.strPostponed);
+  let status = mapStatus(ev.strStatus, ev.strPostponed);
+  const score = parseScore(ev.intHomeScore, ev.intAwayScore);
+
+  // A API free do TheSportsDB frequentemente fica presa em "2H" e nunca muda
+  // para "FT". Se o jogo está "live", tem placar e o kickoff foi há mais de 3h,
+  // o jogo certamente terminou — forçamos "finished".
+  if (
+    status === "live" &&
+    score !== null &&
+    Date.now() - kickoff.getTime() > MATCH_MAX_DURATION_MS
+  ) {
+    status = "finished";
+  }
 
   return {
     externalId,
@@ -134,7 +149,7 @@ export function normalizeEvent(ev: SportsDbEvent): NormalizedFixture | null {
     away: { name: ev.strAwayTeam, flag: ev.strAwayTeamBadge ?? undefined },
     kickoff,
     status,
-    score: parseScore(ev.intHomeScore, ev.intAwayScore),
+    score,
   };
 }
 
