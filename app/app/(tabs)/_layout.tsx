@@ -19,10 +19,7 @@ export default function TabsLayout() {
           tabBarActiveTintColor: palette.primary,
           tabBarInactiveTintColor: palette.textFaint,
           tabBarLabelStyle: { fontFamily: "Inter_600SemiBold", fontSize: 11 },
-          headerStyle: { backgroundColor: palette.bg },
-          headerTintColor: palette.text,
-          headerTitleStyle: { fontFamily: "Inter_700Bold", fontSize: 20 },
-          headerShadowVisible: false,
+          headerShown: false,
         }}
       >
         <Tabs.Screen

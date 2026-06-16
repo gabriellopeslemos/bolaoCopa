@@ -7,9 +7,12 @@ node_modules/
 dist/
 packages/scoring/dist/
 functions/lib/
+functions/packages/
 
 .firebase/
 firebase-debug.log
 firestore-debug.log
 ui-debug.log
 .DS_Store
+serviceAccount.json
+claude.md

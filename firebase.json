@@ -8,8 +8,9 @@
       "source": "functions",
       "codebase": "default",
       "predeploy": [
-        "npm --prefix \"$RESOURCE_DIR/../packages/scoring\" run build",
-        "npm --prefix \"$RESOURCE_DIR\" run build"
+        "npm --prefix \"packages/scoring\" run build",
+        "node scripts/copy-scoring-to-functions.mjs",
+        "npm --prefix \"functions\" run build"
       ]
     }
   ],

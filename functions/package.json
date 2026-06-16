@@ -14,7 +14,7 @@
     "logs": "firebase functions:log"
   },
   "dependencies": {
-    "@bolao/scoring": "file:../packages/scoring",
+    "@bolao/scoring": "file:./packages/scoring",
     "firebase-admin": "^12.3.1",
     "firebase-functions": "^5.0.1"
   },

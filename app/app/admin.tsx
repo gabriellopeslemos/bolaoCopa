@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { View, StyleSheet, ScrollView, Alert } from "react-native";
 import { httpsCallable } from "firebase/functions";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { fns } from "@/lib/firebase";
+import { auth, fns } from "@/lib/firebase";
 import { Screen, Text, Card, Button, Input } from "@/components/ui";
 import { palette, spacing } from "@/lib/theme";
 
@@ -17,6 +17,8 @@ export default function AdminScreen() {
   async function sync() {
     setSyncing(true);
     try {
+      // Força refresh do token para garantir que o claim admin está presente.
+      await auth.currentUser?.getIdToken(true);
       const fn = httpsCallable<void, { synced: number }>(fns, "syncFixturesNow");
       const res = await fn();
       Alert.alert("Sincronizado ✓", `${res.data.synced} jogos atualizados.`);
@@ -85,7 +87,12 @@ export default function AdminScreen() {
 }
 
 function humanError(e: unknown): string {
-  if (e && typeof e === "object" && "message" in e) return String((e as { message: string }).message);
+  if (e && typeof e === "object") {
+    const err = e as { message?: string; code?: string; details?: unknown };
+    const code = err.code ? `[${err.code}] ` : "";
+    const msg = err.message ?? "Falha na operação.";
+    return `${code}${msg}`;
+  }
   return "Falha na operação.";
 }
 

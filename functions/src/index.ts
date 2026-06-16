@@ -76,13 +76,13 @@ export const syncFixtures = onSchedule(
 );
 
 /** Sincronização sob demanda (apenas admin). */
-export const syncFixturesNow = onCall(async (req) => {
+export const syncFixturesNow = onCall({ invoker: "public" }, async (req) => {
   await assertAdmin(req.auth?.uid);
   return syncFromApi(SPORTSDB_API_KEY.value());
 });
 
 /** Lança/ajusta o placar de um jogo manualmente (fallback sem API). */
-export const setMatchResult = onCall(async (req) => {
+export const setMatchResult = onCall({ invoker: "public" }, async (req) => {
   await assertAdmin(req.auth?.uid);
   const { matchId, home, away, status } = req.data ?? {};
   if (typeof matchId !== "string" || !Number.isInteger(home) || !Number.isInteger(away)) {
@@ -109,7 +109,7 @@ export const betReminders = onSchedule(
 );
 
 /** Dispara os lembretes sob demanda (apenas admin) — útil para testes. */
-export const sendRemindersNow = onCall(async (req) => {
+export const sendRemindersNow = onCall({ invoker: "public" }, async (req) => {
   await assertAdmin(req.auth?.uid);
   return sendBetReminders();
 });
@@ -136,13 +136,13 @@ export const onMatchWrite = onDocumentWritten("matches/{matchId}", async (event)
 });
 
 /** Avança o torneio sob demanda (apenas admin) — útil para testes. */
-export const progressTournamentNow = onCall(async (req) => {
+export const progressTournamentNow = onCall({ invoker: "public" }, async (req) => {
   await assertAdmin(req.auth?.uid);
   return progressTournamentAllGroups();
 });
 
 /** Entrar em um grupo via código de convite. */
-export const joinGroup = onCall(async (req) => {
+export const joinGroup = onCall({ invoker: "public" }, async (req) => {
   const uid = req.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Faça login para entrar em um grupo.");
 
