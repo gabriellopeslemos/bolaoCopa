@@ -9,7 +9,7 @@ export function TeamCrest({ team, size = 40 }: { team: TeamInfo; size?: number }
     return (
       <Image
         source={{ uri: team.flag }}
-        style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: palette.surfaceAlt }}
+        style={{ width: size, height: size, borderRadius: 0, backgroundColor: palette.surfaceAlt }}
       />
     );
   }
@@ -18,10 +18,10 @@ export function TeamCrest({ team, size = 40 }: { team: TeamInfo; size?: number }
     <View
       style={[
         styles.fallback,
-        { width: size, height: size, borderRadius: size / 2, backgroundColor: bg + "2A", borderColor: bg + "66" },
+        { width: size, height: size, borderRadius: 0, backgroundColor: bg + "2A", borderColor: bg + "66" },
       ]}
     >
-      <Text style={{ fontSize: size * 0.34, color: bg, fontFamily: "Inter_700Bold" }}>
+      <Text style={{ fontSize: size * 0.34, color: bg, fontWeight: "900" }}>
         {initials(team.name)}
       </Text>
     </View>

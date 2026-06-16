@@ -29,7 +29,7 @@ export function Card({ children, style, padded = true, highlight, elevated }: Pr
 const styles = StyleSheet.create({
   card: {
     backgroundColor: palette.surface,
-    borderRadius: radius.lg,
+    borderRadius: radius.md,  // 0px — sharp corners (street aesthetic)
     borderWidth: 1,
     borderColor: palette.border,
   },
@@ -37,5 +37,6 @@ const styles = StyleSheet.create({
   highlight: {
     borderColor: palette.primary,
     backgroundColor: palette.bgElevated,
+    // Active/highlight state uses primary border + glow
   },
 });

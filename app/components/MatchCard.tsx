@@ -88,7 +88,7 @@ export function MatchCard({ match, bet, onPress }: Props) {
 const styles = StyleSheet.create({
   card: {
     backgroundColor: palette.surface,
-    borderRadius: radius.lg,
+    borderRadius: radius.md,  // 0px — sharp corners (street aesthetic)
     borderWidth: 1,
     borderColor: palette.border,
     padding: spacing.lg,

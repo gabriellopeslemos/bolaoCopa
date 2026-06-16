@@ -210,6 +210,158 @@ npm start        # escaneie o QR code com o Expo Go no celular
 
 ---
 
+## Rodar o app localmente (detalhe)
+
+O app é feito com **Expo** (React Native). Você pode rodá-lo de três formas:
+
+### Opção A — Celular físico via Expo Go (mais simples)
+
+1. Instale o **Expo Go** no celular ([Android](https://play.google.com/store/apps/details?id=host.exp.exponent) / [iOS](https://apps.apple.com/app/expo-go/id982107779)).
+2. Certifique-se de que o celular está **na mesma rede Wi-Fi** que o computador.
+3. Rode:
+   ```bash
+   cd app
+   npm start
+   ```
+4. Escaneie o **QR code** exibido no terminal com o Expo Go (Android) ou com a câmera (iOS).
+
+> Se a conexão falhar por causa de rede, tente `npm start -- --tunnel` para rotear via
+> servidor Expo (requer conta no expo.dev).
+
+### Opção B — Navegador (web)
+
+```bash
+cd app
+npm run web
+```
+
+Abre em `http://localhost:8081`. Útil para iterar rápido em telas sem precisar de celular.
+Algumas APIs nativas (notificações, haptics) não funcionam no browser — use com moderação.
+
+### Opção C — Emulador Android / Simulador iOS
+
+```bash
+cd app
+npm run android   # abre no emulador Android (Android Studio instalado)
+npm run ios       # abre no simulador iOS (apenas macOS com Xcode)
+```
+
+> No Windows, apenas `npm run android` funciona. O Xcode é macOS-only.
+
+### Pré-requisitos
+
+| Ferramenta | Instalação |
+|---|---|
+| Node.js 20+ | https://nodejs.org |
+| Expo CLI | já vem com `expo` nas dependências — não precisa instalar globalmente |
+| Java 17+ | necessário só para emulador Android (Android Studio inclui) |
+| `app/.env.local` | preenchido conforme o passo 8 |
+
+### Variáveis de ambiente relevantes para desenvolvimento
+
+```
+# Aponta o app para os emuladores locais do Firebase (passo da seção de emuladores)
+EXPO_PUBLIC_FIREBASE_USE_EMULATOR=true
+```
+
+Deixe a variável vazia ou ausente para usar o Firebase de produção.
+
+---
+
+## Popular dados de jogos via API
+
+### Opção A — Painel admin do app (produção / emulador)
+
+Com o app rodando e sua conta com o claim `admin: true` (passo 10):
+
+1. Abra o app → aba **Perfil** → seção **Administração**.
+2. Toque em **Sincronizar agora**.
+
+Isso chama a Cloud Function `syncFixturesNow`, que busca os jogos e placares
+da Copa do Mundo diretamente na API TheSportsDB e faz upsert na coleção
+`matches`.
+
+> Com o emulador no ar (`firebase emulators:start`) a função chama a API real
+> do TheSportsDB — portanto exige conexão com a internet e a chave configurada
+> em `functions/.env`.
+
+---
+
+### Opção B — Script de seed (desenvolvimento local, sem API externa)
+
+O script `scripts/seed.mjs` insere partidas fictícias diretamente no Firestore,
+sem depender da TheSportsDB. Ideal para rodar offline ou com o emulador.
+
+**Pré-requisito:** dependências das functions instaladas.
+
+```bash
+cd functions
+npm install
+```
+
+**Contra o emulador local** (emulador deve estar no ar):
+
+```powershell
+# PowerShell
+$env:FIRESTORE_EMULATOR_HOST="127.0.0.1:8080"
+$env:GOOGLE_CLOUD_PROJECT="<SEU_PROJECT_ID>"   # ex: bolaocopa-22280
+node ../scripts/seed.mjs
+```
+
+```bash
+# bash / Git Bash
+FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GOOGLE_CLOUD_PROJECT=<SEU_PROJECT_ID> node ../scripts/seed.mjs
+```
+
+**Contra o projeto real** (requer `serviceAccount.json` do passo 10-A):
+
+```bash
+GOOGLE_APPLICATION_CREDENTIALS=../serviceAccount.json node ../scripts/seed.mjs
+```
+
+O script cria 5 partidas de demonstração na coleção `matches`:
+
+| ID | Confronto | Situação |
+|---|---|---|
+| `world-cup-2026-1` | Brasil × Sérvia | agendado (+2h) |
+| `world-cup-2026-2` | Suíça × Camarões | agendado (+5h) |
+| `world-cup-2026-3` | Argentina × México | agendado (+26h) |
+| `world-cup-2026-4` | França × Austrália | finalizado 4×1 |
+| `world-cup-2026-5` | Dinamarca × Tunísia | finalizado 0×0 |
+
+Os kickoffs são relativos ao momento em que o script é executado.
+
+---
+
+### Opção C — Script de seed para o Mata-mata (testes avançados)
+
+O script `scripts/seedTournament.mjs` cria um grupo de teste completo com
+8 participantes, jogos de todas as fases (qualificatória, grupos, eliminatória)
+e palpites — tudo `scheduled`. Use para validar o motor de pontuação e o
+avanço do mata-mata fase a fase.
+
+**Apenas contra o emulador** (o script recusa rodar contra produção):
+
+```powershell
+# PowerShell — passe o GROUP_ID que você criou no app (opcional)
+$env:FIRESTORE_EMULATOR_HOST="127.0.0.1:8080"
+$env:GOOGLE_CLOUD_PROJECT="<SEU_PROJECT_ID>"
+node ../scripts/seedTournament.mjs <GROUP_ID>
+```
+
+Sem `<GROUP_ID>`, cria o grupo `mm-test-group` (não vinculado à sua conta).
+
+Depois de executar, finalize os jogos **nesta ordem** via Emulator UI
+(`localhost:4000`) ou pela tela Administração do app:
+
+1. `mm-q1` (Qualificatória)
+2. `mm-g1` (Fase de Grupos)
+3. `mm-k1`, `mm-k2`, `mm-k3` (Eliminatórias)
+
+Acompanhe a pontuação e o avanço nas abas **Ranking** e **Mata-mata**.
+
+---
+
 ## Testar sem a API de futebol
 
 Se quiser validar sem depender da sincronização, crie jogos manualmente no
@@ -229,6 +381,97 @@ Se quiser validar sem depender da sincronização, crie jogos manualmente no
 Depois do "jogo", use **Perfil → Administração → Lançar resultado** no app para
 definir o placar — isso dispara a Cloud Function `onMatchWrite`, que pontua todos
 os palpites automaticamente.
+
+---
+
+## Desenvolvimento local das Firebase Functions
+
+Para iterar nas functions sem fazer deploy a cada mudança, use o **Firebase Emulator Suite**.
+
+> Pré-requisito: Java 11+ instalado (`java -version`). O emulador do Firestore
+> precisa do JDK — baixe em **https://adoptium.net** se não tiver.
+
+### 1. Instalar dependências das functions
+
+```bash
+cd functions
+npm install
+```
+
+### 2. Criar o `functions/.env` com as variáveis de ambiente
+
+```bash
+# na pasta functions/
+cp .env.example .env   # se existir, ou crie manualmente:
+echo "SPORTSDB_API_KEY=123" > .env
+```
+
+> Use `123` (chave free pública) para desenvolvimento local.
+
+### 3. Configurar o emulador (uma vez só)
+
+Na **raiz do projeto**, inicie a configuração interativa:
+
+```bash
+firebase init emulators
+```
+
+Selecione ao menos:
+- **Functions Emulator** (porta padrão: `5001`)
+- **Firestore Emulator** (porta padrão: `8080`)
+
+Isso gera/atualiza o bloco `"emulators"` em `firebase.json`.
+
+### 4. Iniciar os emuladores
+
+```bash
+# na raiz do projeto
+firebase emulators:start
+```
+
+O terminal mostra as URLs de cada emulador. A UI de inspeção fica em
+`http://localhost:4000` por padrão.
+
+### 5. Apontar o app para os emuladores
+
+Em `app/.env.local`, adicione (ou descomente) as variáveis abaixo:
+
+```
+EXPO_PUBLIC_FIREBASE_USE_EMULATOR=true
+```
+
+O arquivo `app/lib/firebase.ts` (ou equivalente de inicialização) deve checar
+essa variável e conectar os SDKs ao emulador local. Exemplo de configuração:
+
+```ts
+if (process.env.EXPO_PUBLIC_FIREBASE_USE_EMULATOR === 'true') {
+  connectFirestoreEmulator(db, 'localhost', 8080);
+  connectFunctionsEmulator(functions, 'localhost', 5001);
+}
+```
+
+> Remova ou deixe vazia a variável para voltar ao Firebase de produção.
+
+### 6. Chamar uma function manualmente (opcional)
+
+Com o emulador rodando, você pode invocar uma function HTTP/callable via curl:
+
+```bash
+# example: sync fixtures
+curl -X POST http://localhost:5001/<PROJECT_ID>/us-central1/syncFixtures
+```
+
+Substitua `<PROJECT_ID>` pelo ID do projeto Firebase (ex.: `bolao-copa-1a2b3`).
+
+### Dicas de desenvolvimento local
+
+| Situação | Ação |
+|---|---|
+| Mudou o código de uma function | Recompile (`npm run build` em `functions/`) — o emulador recarrega automaticamente em watch mode |
+| Quer watch mode | `cd functions && npm run build -- --watch` em terminal separado |
+| Inspecionar Firestore local | Abra `http://localhost:4000` → aba **Firestore** |
+| Ver logs das functions | Terminal do `firebase emulators:start` ou aba **Logs** em `localhost:4000` |
+| Resetar dados do emulador | Reinicie o emulador (Ctrl+C e `firebase emulators:start` de novo) |
 
 ---
 

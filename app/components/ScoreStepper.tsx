@@ -69,13 +69,13 @@ const styles = StyleSheet.create({
   name: { flexShrink: 1 },
   stepper: { alignItems: "center", gap: spacing.sm },
   valueBox: {
-    minWidth: 64, height: 64, borderRadius: radius.lg,
+    minWidth: 64, height: 64, borderRadius: radius.md,  // 0px — sharp corners
     backgroundColor: palette.bgElevated, borderWidth: 1, borderColor: palette.border,
     alignItems: "center", justifyContent: "center",
   },
-  value: { fontFamily: "Inter_800ExtraBold", fontSize: 34, color: palette.text },
+  value: { fontWeight: "900", fontSize: 48, color: palette.text },  // scoreLg from design system
   btn: {
-    width: 44, height: 44, borderRadius: radius.md,
+    width: 44, height: 44, borderRadius: radius.xs,  // 0px — sharp corners
     backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border,
     alignItems: "center", justifyContent: "center",
   },

@@ -18,7 +18,7 @@ export function Avatar({ name, size = 44, ring }: Props) {
         {
           width: size,
           height: size,
-          borderRadius: size / 2,
+          borderRadius: 0,  // square corners (street aesthetic)
           backgroundColor: bg + "33",
           borderColor: ring ? palette.primary : bg,
           borderWidth: ring ? 2 : 1.5,
@@ -26,7 +26,7 @@ export function Avatar({ name, size = 44, ring }: Props) {
       ]}
     >
       <Text
-        style={{ fontSize: size * 0.36, color: bg, fontFamily: "Inter_700Bold" }}
+        style={{ fontSize: size * 0.36, color: bg, fontWeight: "900" }}
       >
         {initials(name)}
       </Text>

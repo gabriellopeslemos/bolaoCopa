@@ -77,12 +77,12 @@ export function Button({
             colors={gradients.brand}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={[styles.base, { height: h }, shadow.glow as ViewStyle]}
+            style={[styles.base, { height: h }, shadow.glowPrimary as ViewStyle]}
           >
             {content}
           </LinearGradient>
         ) : (
-          <View style={[styles.base, { height: h }, variantStyle(variant)]}>{content}</View>
+          <View style={[styles.base, { height: h }, shadow.card as ViewStyle, variantStyle(variant)]}>{content}</View>
         )}
       </Pressable>
     </Animated.View>
@@ -108,7 +108,7 @@ function variantStyle(v: Variant): ViewStyle {
 
 const styles = StyleSheet.create({
   base: {
-    borderRadius: radius.lg,
+    borderRadius: radius.md,  // 0px — sharp corners (street aesthetic)
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: spacing.xl,
