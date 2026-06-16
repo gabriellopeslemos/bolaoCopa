@@ -1,50 +1,50 @@
 import React, { useState, useRef, useEffect } from "react";
-import { FlatList, View, StyleSheet, RefreshControl, ScrollView, TouchableOpacity } from "react-native";
+import {
+  FlatList,
+  ScrollView,
+  View,
+  StyleSheet,
+  RefreshControl,
+  TouchableOpacity,
+  Text as RNText,
+} from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/hooks/useAuth";
 import { useActiveGroup } from "@/hooks/useActiveGroup";
 import { useMatches, useMyBets } from "@/lib/data";
-import { Screen, Text, EmptyState, SkeletonCard, FadeIn, Button } from "@/components/ui";
+import { EmptyState, SkeletonCard, FadeIn, Button } from "@/components/ui";
 import { MatchCard } from "@/components/MatchCard";
 import { isBettingOpen } from "@/lib/format";
-import { palette, spacing, radius } from "@/lib/theme";
+import { palette, spacing, font } from "@/lib/theme";
+const WEEKDAY_SHORT = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+const MONTH_NAMES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 
-const MONTH_NAMES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
-const CIRCLE_SIZE = 50;
-const CIRCLE_GAP = spacing.sm;
-
-const TOURNAMENT_START = new Date(2026, 5, 11); // 11 jun
-const TOURNAMENT_END   = new Date(2026, 6, 19); // 19 jul
-
-function generateDateRange(): Date[] {
-  const dates: Date[] = [];
-  const cur = new Date(TOURNAMENT_START);
-  while (cur <= TOURNAMENT_END) {
-    dates.push(new Date(cur));
-    cur.setDate(cur.getDate() + 1);
-  }
-  return dates;
+function toDateKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
-function isSameDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
+function parseDateKey(key: string): { day: number; weekday: string; month: string; year: number } {
+  const [y, m, d] = key.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  return { day: d, weekday: WEEKDAY_SHORT[date.getDay()], month: MONTH_NAMES[m - 1], year: y };
 }
 
-function getInitialDate(dates: Date[]): Date {
-  const today = new Date();
-  if (today >= TOURNAMENT_START && today <= TOURNAMENT_END) {
-    return dates.find((d) => isSameDay(d, today)) ?? dates[0];
-  }
-  if (today < TOURNAMENT_START) return dates[0];
-  return dates[dates.length - 1];
+function formatHeaderSubtitle(key: string): string {
+  const { day, weekday, month, year } = parseDateKey(key);
+  return `${weekday}, ${day} ${month} ${year} · Copa do Mundo`;
 }
 
-const DATES = generateDateRange();
+function getItemOpacity(index: number, selectedIndex: number): number {
+  const dist = Math.abs(index - selectedIndex);
+  if (dist === 0) return 1;
+  if (dist === 1) return 0.6;
+  if (dist === 2) return 0.45;
+  return 0.35;
+}
 
 export default function MatchesScreen() {
   const insets = useSafeAreaInsets();
@@ -52,88 +52,102 @@ export default function MatchesScreen() {
   const { user } = useAuth();
   const { activeGroupId, activeGroup } = useActiveGroup();
 
-  const [selectedDate, setSelectedDate] = useState<Date>(() => getInitialDate(DATES));
   const [statusFilter, setStatusFilter] = useState<"upcoming" | "finished">("upcoming");
-  const scrollRef = useRef<ScrollView>(null);
+  const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
+
+  const dateScrollRef = useRef<ScrollView>(null);
 
   const { data: matches, isLoading, refetch, isRefetching } = useMatches();
   const myBets = useMyBets(activeGroupId, user?.uid);
 
-  const filteredMatches =
-    matches?.filter((m) => {
-      if (!m.kickoff) return false;
-      const d = m.kickoff.toDate();
-      if (!isSameDay(d, selectedDate)) return false;
-      if (statusFilter === "finished") return m.status === "finished";
-      return m.status === "scheduled" || m.status === "live";
-    }) ?? [];
+  // All filtered matches for the selected tab
+  const filtered = matches?.filter((m) => {
+    if (!m.kickoff) return false;
+    if (statusFilter === "finished") return m.status === "finished";
+    return m.status === "scheduled" || m.status === "live";
+  }) ?? [];
 
-  // Scroll date picker to selected date on mount
+  // Unique sorted date keys
+  const dateKeys = Array.from(new Set(filtered.map((m) => toDateKey(m.kickoff.toDate())))).sort(
+    (a, b) => (statusFilter === "finished" ? b.localeCompare(a) : a.localeCompare(b))
+  );
+
+  // Keep selected date valid when filter changes
   useEffect(() => {
-    const idx = DATES.findIndex((d) => isSameDay(d, selectedDate));
-    if (idx > 0) {
-      const offset = spacing.xl + idx * (CIRCLE_SIZE + CIRCLE_GAP) - 80;
-      setTimeout(() => scrollRef.current?.scrollTo({ x: Math.max(0, offset), animated: false }), 50);
+    if (dateKeys.length === 0) {
+      setSelectedDateKey(null);
+      return;
     }
-  }, []);
+    setSelectedDateKey((prev) => (prev && dateKeys.includes(prev) ? prev : dateKeys[0]));
+  }, [statusFilter, dateKeys.join(",")]);
 
-  function handleSelectDate(date: Date) {
-    setSelectedDate(date);
-    const idx = DATES.findIndex((d) => isSameDay(d, date));
-    const offset = spacing.xl + idx * (CIRCLE_SIZE + CIRCLE_GAP) - 80;
-    scrollRef.current?.scrollTo({ x: Math.max(0, offset), animated: true });
-  }
+  // Scroll selected date chip into view
+  useEffect(() => {
+    if (!selectedDateKey) return;
+    const idx = dateKeys.indexOf(selectedDateKey);
+    if (idx < 0) return;
+    // Each item is roughly 44px wide + 18px gap
+    const offset = 20 + idx * 62 - 100;
+    setTimeout(() => dateScrollRef.current?.scrollTo({ x: Math.max(0, offset), animated: true }), 50);
+  }, [selectedDateKey]);
+
+  // Matches for the selected date only
+  const visibleMatches = selectedDateKey
+    ? filtered
+        .filter((m) => toDateKey(m.kickoff.toDate()) === selectedDateKey)
+        .sort((a, b) =>
+          statusFilter === "finished"
+            ? b.kickoff.toMillis() - a.kickoff.toMillis()
+            : a.kickoff.toMillis() - b.kickoff.toMillis()
+        )
+    : [];
+
+  const selectedIndex = dateKeys.indexOf(selectedDateKey ?? "");
 
   return (
-    <Screen edges={{ top: true }}>
+    <View style={[styles.screen, { paddingTop: insets.top }]}>
+      {/* ── Header ── */}
       <View style={styles.header}>
-        <Text variant="title">Jogos</Text>
-        <Text variant="body" color={palette.textMuted}>
-          {activeGroup
-            ? `Palpites no bolão "${activeGroup.name}"`
-            : "Todas as partidas da competição"}
-        </Text>
+        <RNText style={styles.pageTitle}>Jogos</RNText>
+        <RNText style={styles.pageSubtitle}>
+          {selectedDateKey ? formatHeaderSubtitle(selectedDateKey) : "Copa do Mundo 2026"}
+        </RNText>
       </View>
 
-      {/* Date circles */}
-      <ScrollView
-        ref={scrollRef}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.dateList}
-        style={styles.dateScroll}
-      >
-        {DATES.map((date) => {
-          const isSelected = isSameDay(date, selectedDate);
-          const isToday = isSameDay(date, new Date());
-          return (
-            <TouchableOpacity
-              key={date.toISOString()}
-              onPress={() => handleSelectDate(date)}
-              style={[styles.circle, isSelected && styles.circleSelected]}
-              activeOpacity={0.7}
-            >
-              <Text
-                variant="label"
-                color={isSelected ? palette.bg : palette.text}
-              >
-                {date.getDate()}
-              </Text>
-              <Text
-                variant="caption"
-                color={isSelected ? palette.bg : palette.textMuted}
-              >
-                {MONTH_NAMES[date.getMonth()]}
-              </Text>
-              {isToday && (
-                <View style={[styles.todayDot, isSelected && styles.todayDotSelected]} />
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
+      {/* ── Date strip ── */}
+      {!isLoading && dateKeys.length > 0 && (
+        <View style={styles.dateStripWrapper}>
+          <ScrollView
+            ref={dateScrollRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.dateStripContent}
+          >
+            {dateKeys.map((key, idx) => {
+              const { day, weekday } = parseDateKey(key);
+              const isSelected = key === selectedDateKey;
+              const opacity = getItemOpacity(idx, selectedIndex);
+              return (
+                <TouchableOpacity
+                  key={key}
+                  onPress={() => setSelectedDateKey(key)}
+                  activeOpacity={0.7}
+                  style={[styles.dateItem, isSelected && styles.dateItemSelected, { opacity }]}
+                >
+                  <RNText style={[styles.dateWeekday, isSelected && styles.dateWeekdaySelected]}>
+                    {weekday.toUpperCase()}
+                  </RNText>
+                  <RNText style={[styles.dateNumber, isSelected && styles.dateNumberSelected]}>
+                    {day}
+                  </RNText>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
 
-      {/* Status toggle */}
+      {/* ── Toggle ── */}
       <View style={styles.toggleWrapper}>
         <View style={styles.toggleContainer}>
           <TouchableOpacity
@@ -141,35 +155,33 @@ export default function MatchesScreen() {
             onPress={() => setStatusFilter("upcoming")}
             activeOpacity={0.8}
           >
-            <Text
-              variant="label"
-              color={statusFilter === "upcoming" ? palette.bg : palette.textMuted}
-            >
+            <RNText style={[styles.toggleText, statusFilter === "upcoming" && styles.toggleTextActive]}>
               Próximos
-            </Text>
+            </RNText>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.toggleOption, statusFilter === "finished" && styles.toggleOptionActive]}
             onPress={() => setStatusFilter("finished")}
             activeOpacity={0.8}
           >
-            <Text
-              variant="label"
-              color={statusFilter === "finished" ? palette.bg : palette.textMuted}
-            >
+            <RNText style={[styles.toggleText, statusFilter === "finished" && styles.toggleTextActive]}>
               Finalizados
-            </Text>
+            </RNText>
           </TouchableOpacity>
         </View>
       </View>
 
+      {/* ── Match list ── */}
       {isLoading ? (
-        <View style={styles.list}>{[0, 1, 2, 3].map((i) => <SkeletonCard key={i} />)}</View>
+        <View style={styles.list}>
+          {[0, 1, 2, 3].map((i) => <SkeletonCard key={i} />)}
+        </View>
       ) : (
         <FlatList
-          data={filteredMatches}
+          data={visibleMatches}
           keyExtractor={(m) => m.id}
-          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + spacing.xl }]}
+          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + spacing.xxxl }]}
+          showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={isRefetching}
@@ -180,9 +192,9 @@ export default function MatchesScreen() {
           ListHeaderComponent={
             !activeGroupId ? (
               <View style={styles.notice}>
-                <Text variant="caption" color={palette.textMuted}>
+                <RNText style={styles.noticeText}>
                   Selecione um grupo no Perfil para palpitar.
-                </Text>
+                </RNText>
                 <Button
                   title="Ir para o Perfil"
                   variant="secondary"
@@ -198,16 +210,17 @@ export default function MatchesScreen() {
               title={statusFilter === "finished" ? "Nenhum jogo finalizado" : "Nenhum jogo agendado"}
               subtitle={
                 statusFilter === "finished"
-                  ? "Sem partidas encerradas nesta data."
-                  : "Sem partidas agendadas para esta data. Selecione outro dia."
+                  ? "Nenhuma partida encerrada ainda."
+                  : "Nenhuma partida agendada."
               }
             />
           }
+          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           renderItem={({ item, index }) => {
             const bet = myBets.data?.[item.id];
             const open = isBettingOpen(item);
             return (
-              <FadeIn delay={index * 40}>
+              <FadeIn delay={index * 30}>
                 <MatchCard
                   match={item}
                   bet={bet}
@@ -225,72 +238,136 @@ export default function MatchesScreen() {
           }}
         />
       )}
-    </Screen>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.lg,
-    gap: 2,
-  },
-  dateScroll: {
-    flexGrow: 0,
-    marginBottom: spacing.lg,
-  },
-  dateList: {
-    paddingHorizontal: spacing.xl,
-    gap: CIRCLE_GAP,
-    alignItems: "center",
-  },
-  circle: {
-    width: CIRCLE_SIZE,
-    height: CIRCLE_SIZE,
-    borderRadius: CIRCLE_SIZE / 2,
-    backgroundColor: palette.surface,
-    borderWidth: 1,
-    borderColor: palette.border,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 1,
-  },
-  circleSelected: {
-    backgroundColor: palette.primary,
-    borderColor: palette.primary,
-  },
-  todayDot: {
-    position: "absolute",
-    bottom: 5,
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: palette.primary,
-  },
-  todayDotSelected: {
+  screen: {
+    flex: 1,
     backgroundColor: palette.bg,
   },
-  toggleWrapper: {
+
+  // ── Header ──
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.bgElevated,
+  },
+  pageTitle: {
+    fontFamily: font.display,
+    fontSize: 34,
+    letterSpacing: 2,
+    color: palette.text,
+    lineHeight: 36,
+  },
+  pageSubtitle: {
+    fontFamily: font.bold,
+    fontSize: 11,
+    fontWeight: undefined,
+    letterSpacing: 3,
+    color: palette.textFaint,
+    textTransform: "uppercase",
+    marginTop: 1,
+  },
+
+  // ── Date strip ──
+  dateStripWrapper: {
+    borderBottomWidth: 1,
+    borderBottomColor: palette.bgElevated,
+  },
+  dateStripContent: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    gap: 18,
+    alignItems: "flex-end",
+    paddingBottom: 0,
+  },
+  dateItem: {
     alignItems: "center",
-    marginBottom: spacing.lg,
+    gap: 3,
+    paddingBottom: 8,
+  },
+  dateItemSelected: {
+    borderBottomWidth: 2,
+    borderBottomColor: palette.primary,
+    paddingBottom: 4,
+  },
+  dateWeekday: {
+    fontFamily: font.bold,
+    fontSize: 10,
+    fontWeight: undefined,
+    letterSpacing: 1,
+    color: palette.textMuted,
+    textTransform: "uppercase",
+  },
+  dateWeekdaySelected: {
+    color: palette.primary,
+  },
+  dateNumber: {
+    fontFamily: font.display,
+    fontSize: 22,
+    color: palette.text,
+    lineHeight: 22,
+  },
+  dateNumberSelected: {
+    fontSize: 28,
+    lineHeight: 28,
+    color: palette.primary,
+  },
+
+  // ── Toggle ──
+  toggleWrapper: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 14,
   },
   toggleContainer: {
     flexDirection: "row",
     backgroundColor: palette.surface,
-    borderRadius: radius.pill,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: palette.border,
     padding: 3,
   },
   toggleOption: {
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
+    flex: 1,
+    paddingVertical: 7,
+    paddingHorizontal: 22,
+    borderRadius: 8,
+    alignItems: "center",
   },
   toggleOptionActive: {
     backgroundColor: palette.primary,
   },
-  list: { paddingHorizontal: spacing.xl, gap: spacing.md, flexGrow: 1 },
-  notice: { gap: spacing.sm, marginBottom: spacing.md },
+  toggleText: {
+    fontFamily: font.bold,
+    fontSize: 12,
+    fontWeight: undefined,
+    letterSpacing: 1.5,
+    color: palette.textFaint,
+    textTransform: "uppercase",
+  },
+  toggleTextActive: {
+    color: palette.textOnPrimary,
+  },
+
+  // ── List ──
+  list: {
+    paddingHorizontal: 16,
+    paddingTop: 0,
+    flexGrow: 1,
+  },
+  notice: {
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+    paddingTop: spacing.md,
+  },
+  noticeText: {
+    fontFamily: font.regular,
+    fontSize: 12,
+    color: palette.textMuted,
+  },
 });

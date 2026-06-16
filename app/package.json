@@ -4,6 +4,8 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@bolao/scoring": "file:../packages/scoring",
+    "@expo-google-fonts/barlow-condensed": "^0.4.1",
+    "@expo-google-fonts/bebas-neue": "^0.4.1",
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo/ngrok": "^4.1.3",
     "@expo/vector-icons": "^15.1.1",

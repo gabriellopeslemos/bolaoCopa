@@ -26,6 +26,7 @@ export interface Match {
   kickoff: Timestamp;
   status: MatchStatus;
   score: Score | null;
+  elapsed?: number | null;
 }
 
 export interface Group {

@@ -104,35 +104,34 @@ export const radius = {
   xs: 0, sm: 0, md: 0, lg: 0, xl: 0, xxl: 0, pill: 999,
 } as const;
 
-// Typography: Bebas Neue (display/scores) + Barlow Condensed (UI) — using system fallbacks in React Native
+// Typography: Bebas Neue (display/scores) + Barlow Condensed (UI)
 export const font = {
-  regular:    "System",
-  medium:     "System",
-  semibold:   "System",
-  bold:       "System",
-  extrabold:  "System",
-  // Display fonts (Bebas Neue equivalent — heavy, condensed)
-  displayBold: "System",
-  // UI fonts (Barlow Condensed equivalent — compact, industrial)
-  sansBold: "System",
+  regular:     "BarlowCondensed_400Regular",
+  medium:      "BarlowCondensed_500Medium",
+  semibold:    "BarlowCondensed_600SemiBold",
+  bold:        "BarlowCondensed_700Bold",
+  extrabold:   "BarlowCondensed_800ExtraBold",
+  display:     "BebasNeue_400Regular",
+  displayBold: "BebasNeue_400Regular",
+  sansBold:    "BarlowCondensed_700Bold",
 } as const;
 
-// Typography scale — street/stencil register (Bebas Neue + Barlow Condensed)
+// Typography scale — Bebas Neue (display) + Barlow Condensed (UI)
 export const type = {
-  // Bebas Neue — display / scores (hero, titles)
-  display:  { fontFamily: font.extrabold, fontSize: 44, lineHeight: 48, fontWeight: "900", letterSpacing: 1 },
-  title:    { fontFamily: font.bold,      fontSize: 30, lineHeight: 36, fontWeight: "800", letterSpacing: 0.5 },
-  heading:  { fontFamily: font.bold,      fontSize: 22, lineHeight: 28, fontWeight: "700", letterSpacing: 0 },
-  subtitle: { fontFamily: font.semibold,  fontSize: 18, lineHeight: 24, fontWeight: "600", letterSpacing: 0 },
+  // Bebas Neue — display / scores / page titles
+  display:  { fontFamily: font.display,   fontSize: 44, lineHeight: 48, letterSpacing: 1 },
+  title:    { fontFamily: font.display,   fontSize: 34, lineHeight: 36, letterSpacing: 2 },
+  heading:  { fontFamily: font.display,   fontSize: 22, lineHeight: 26, letterSpacing: 1 },
+  subtitle: { fontFamily: font.semibold,  fontSize: 18, lineHeight: 22, letterSpacing: 0 },
   // Barlow Condensed — UI (body, labels)
-  body:     { fontFamily: font.regular,   fontSize: 15, lineHeight: 22, fontWeight: "400" },
-  bodyMed:  { fontFamily: font.medium,    fontSize: 15, lineHeight: 22, fontWeight: "500" },
-  label:    { fontFamily: font.bold,      fontSize: 13, lineHeight: 18, fontWeight: "700", letterSpacing: 2 },
-  caption:  { fontFamily: font.medium,    fontSize: 12, lineHeight: 16, fontWeight: "500" },
+  body:     { fontFamily: font.regular,   fontSize: 15, lineHeight: 20 },
+  bodyMed:  { fontFamily: font.medium,    fontSize: 15, lineHeight: 20 },
+  label:    { fontFamily: font.bold,      fontSize: 13, lineHeight: 18, letterSpacing: 1.5, textTransform: "uppercase" as const },
+  caption:  { fontFamily: font.medium,    fontSize: 12, lineHeight: 16 },
   // Numeric display (scoreboards & points) — Bebas Neue
-  score:    { fontFamily: font.extrabold, fontSize: 34, lineHeight: 40, fontWeight: "900", letterSpacing: 0 },
-  scoreLg:  { fontFamily: font.extrabold, fontSize: 48, lineHeight: 56, fontWeight: "900", letterSpacing: 0 },
-  points:   { fontFamily: font.extrabold, fontSize: 30, lineHeight: 36, fontWeight: "900", letterSpacing: 0 },
+  score:    { fontFamily: font.display,   fontSize: 34, lineHeight: 38, letterSpacing: 2 },
+  scoreLg:  { fontFamily: font.display,   fontSize: 48, lineHeight: 52, letterSpacing: 2 },
+  points:   { fontFamily: font.display,   fontSize: 30, lineHeight: 34, letterSpacing: 1 },
 } as const;
 
 // Shadows — hard offset (screen-print style) instead of soft blurs
