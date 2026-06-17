@@ -7,6 +7,7 @@ import {
   RefreshControl,
   TouchableOpacity,
   Text as RNText,
+  useWindowDimensions,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -51,11 +52,15 @@ export default function MatchesScreen() {
   const { user } = useAuth();
   const { activeGroupId } = useActiveGroup();
 
+  const { width: screenWidth } = useWindowDimensions();
+
   const [statusFilter, setStatusFilter] = useState<"upcoming" | "finished">("upcoming");
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
 
   const dateScrollRef = useRef<ScrollView>(null);
   const sectionListRef = useRef<SectionList<Match>>(null);
+  // Measured layout of each date chip within the scroll content
+  const itemLayoutRef = useRef<Record<string, { x: number; width: number }>>({});
 
   // Stable ref so onViewableItemsChanged never changes after mount
   const viewableHandlerRef = useRef<((info: any) => void) | null>(null);
@@ -108,32 +113,42 @@ export default function MatchesScreen() {
     }
   }, [allDateKeys]);
 
-  // When tab changes, jump to first section of the new tab
+  // When tab changes, prefer today's date; fall back to first section
   useEffect(() => {
-    const firstKey = sections[0]?.key ?? allDateKeys[0] ?? null;
-    setSelectedDateKey(firstKey);
+    if (allDateKeys.length === 0) return;
+    const today = toDateKey(new Date());
+    const newKey = allDateKeys.includes(today)
+      ? today
+      : sections[0]?.key ?? allDateKeys[0] ?? null;
+    setSelectedDateKey(newKey);
   }, [statusFilter]);
 
-  // Keep selected date chip scrolled into view
+  const centerDateInStrip = useCallback(
+    (dateKey: string, animated = true) => {
+      const layout = itemLayoutRef.current[dateKey];
+      let offset: number;
+      if (layout) {
+        offset = layout.x + layout.width / 2 - screenWidth / 2;
+      } else {
+        const idx = allDateKeys.indexOf(dateKey);
+        if (idx < 0) return;
+        offset = 20 + idx * 62 + 22 - screenWidth / 2;
+      }
+      dateScrollRef.current?.scrollTo({ x: Math.max(0, offset), animated });
+    },
+    [allDateKeys, screenWidth]
+  );
+
+  // Keep selected date chip centered in view
   useEffect(() => {
     if (!selectedDateKey) return;
-    const idx = allDateKeys.indexOf(selectedDateKey);
-    if (idx < 0) return;
-    const offset = 20 + idx * 62 - 100;
-    setTimeout(
-      () => dateScrollRef.current?.scrollTo({ x: Math.max(0, offset), animated: true }),
-      50
-    );
-  }, [selectedDateKey, allDateKeys]);
+    const t = setTimeout(() => centerDateInStrip(selectedDateKey), 80);
+    return () => clearTimeout(t);
+  }, [selectedDateKey, allDateKeys, screenWidth]);
 
   const scrollDateStripTo = useCallback(
-    (dateKey: string) => {
-      const idx = allDateKeys.indexOf(dateKey);
-      if (idx < 0) return;
-      const offset = 20 + idx * 62 - 100;
-      dateScrollRef.current?.scrollTo({ x: Math.max(0, offset), animated: true });
-    },
-    [allDateKeys]
+    (dateKey: string) => centerDateInStrip(dateKey),
+    [centerDateInStrip]
   );
 
   // Update viewable handler ref on every render so it always sees fresh state/closures
@@ -208,6 +223,12 @@ export default function MatchesScreen() {
                   key={key}
                   onPress={() => handleDatePress(key)}
                   activeOpacity={0.7}
+                  onLayout={(e) => {
+                    itemLayoutRef.current[key] = {
+                      x: e.nativeEvent.layout.x,
+                      width: e.nativeEvent.layout.width,
+                    };
+                  }}
                   style={[styles.dateItem, isSelected && styles.dateItemSelected, { opacity }]}
                 >
                   <RNText style={[styles.dateWeekday, isSelected && styles.dateWeekdaySelected]}>

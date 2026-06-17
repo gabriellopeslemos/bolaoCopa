@@ -8,11 +8,13 @@
  * Regras (cumulativas) conforme a tela "Pontos Base":
  *   - Base: 3 pts por acertar o vencedor (ou o empate)
  *   - Bônus Placar Exato:    +5  (acertou os gols dos dois times)
- *   - Bônus Placar Vencedor: +3  (acertou os gols do time vencedor)
- *   - Bônus Diferença de Gols: +2 (acertou o saldo/margem da partida)
- *   - Bônus Placar Perdedor: +1  (acertou os gols do time perdedor)
+ *   - Bônus Placar Vencedor: +3  (acertou os gols do time vencedor) — só se NÃO acertou o placar exato
+ *   - Bônus Diferença de Gols: +2 (acertou o saldo/margem da partida) — só se NÃO acertou o placar exato
+ *   - Bônus Placar Perdedor: +1  (acertou os gols do time perdedor) — só se NÃO acertou o placar exato
  *   - Bônus Goleada (extra): +1  (foi goleada e você também previu goleada)
  *
+ * Os bônus Placar Vencedor, Diferença de Gols e Placar Perdedor são
+ * mutuamente exclusivos com o Placar Exato.
  * Todos os bônus exigem ter acertado o vencedor (resultado 1/X/2). Se o
  * resultado previsto for de lado diferente do real, o palpite vale 0.
  */
@@ -125,23 +127,28 @@ export function calculatePoints(
   breakdown.base = config.base;
 
   const exact = bet.home === result.home && bet.away === result.away;
-  if (exact) breakdown.exact = config.exact;
+  if (exact) {
+    breakdown.exact = config.exact;
+  } else {
+    // Diferença de gols com sinal (já implica vencedor correto).
+    if (bet.home - bet.away === result.home - result.away) {
+      breakdown.goalDiff = config.goalDiff;
+    }
 
-  // Diferença de gols com sinal (já implica vencedor correto).
-  if (bet.home - bet.away === result.home - result.away) {
-    breakdown.goalDiff = config.goalDiff;
+    const draw = outcome(result) === "draw";
+    if (!draw) {
+      const resWinnerGoals = Math.max(result.home, result.away);
+      const resLoserGoals = Math.min(result.home, result.away);
+      const betWinnerGoals = Math.max(bet.home, bet.away);
+      const betLoserGoals = Math.min(bet.home, bet.away);
+
+      if (betWinnerGoals === resWinnerGoals) breakdown.winnerScore = config.winnerScore;
+      if (betLoserGoals === resLoserGoals) breakdown.loserScore = config.loserScore;
+    }
   }
 
   const draw = outcome(result) === "draw";
   if (!draw) {
-    const resWinnerGoals = Math.max(result.home, result.away);
-    const resLoserGoals = Math.min(result.home, result.away);
-    const betWinnerGoals = Math.max(bet.home, bet.away);
-    const betLoserGoals = Math.min(bet.home, bet.away);
-
-    if (betWinnerGoals === resWinnerGoals) breakdown.winnerScore = config.winnerScore;
-    if (betLoserGoals === resLoserGoals) breakdown.loserScore = config.loserScore;
-
     const resMargin = Math.abs(result.home - result.away);
     const betMargin = Math.abs(bet.home - bet.away);
     if (resMargin >= config.routThreshold && betMargin >= config.routThreshold) {

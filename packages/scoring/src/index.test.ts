@@ -34,17 +34,17 @@ describe("calculatePoints — base", () => {
 });
 
 describe("calculatePoints — bônus isolados", () => {
-  it("placar exato soma todos os bônus aplicáveis (cumulativo)", () => {
-    // 2x1 exato: base3 + exato5 + vencedor3 + saldo2 + perdedor1 = 14
+  it("placar exato dá base + exato (sem acumular os outros bônus)", () => {
+    // 2x1 exato: base3 + exato5 = 8 (vencedor/saldo/perdedor não acumulam com exato)
     const r = calculatePoints({ home: 2, away: 1 }, { home: 2, away: 1 });
     expect(r.exact).toBe(true);
-    expect(r.total).toBe(14);
+    expect(r.total).toBe(8);
     expect(r.breakdown).toEqual({
       base: 3,
       exact: 5,
-      winnerScore: 3,
-      goalDiff: 2,
-      loserScore: 1,
+      winnerScore: 0,
+      goalDiff: 0,
+      loserScore: 0,
       rout: 0,
     });
   });
@@ -96,10 +96,10 @@ describe("calculatePoints — goleada", () => {
     expect(r.breakdown.rout).toBe(0);
   });
 
-  it("placar exato de goleada acumula tudo", () => {
-    // 4x0 exato: base3+exato5+vencedor3+saldo2+perdedor1+goleada1 = 15
+  it("placar exato de goleada dá base + exato + goleada", () => {
+    // 4x0 exato: base3 + exato5 + goleada1 = 9 (vencedor/saldo/perdedor não acumulam)
     const r = calculatePoints({ home: 4, away: 0 }, { home: 4, away: 0 });
-    expect(r.total).toBe(15);
+    expect(r.total).toBe(9);
   });
 });
 
@@ -115,10 +115,10 @@ describe("calculatePoints — empates", () => {
     expect(r.total).toBe(5);
   });
 
-  it("empate exato soma exato", () => {
-    // 1x1 exato: base3 + exato5 + saldo2 = 10
+  it("empate exato dá base + exato (sem saldo)", () => {
+    // 1x1 exato: base3 + exato5 = 8 (saldo não acumula com exato)
     const r = calculatePoints({ home: 1, away: 1 }, { home: 1, away: 1 });
-    expect(r.total).toBe(10);
+    expect(r.total).toBe(8);
   });
 });
 
@@ -131,8 +131,8 @@ describe("calculatePoints — entradas inválidas", () => {
 
 describe("maxPossiblePoints", () => {
   it("retorna o total de um acerto exato do próprio palpite", () => {
-    expect(maxPossiblePoints({ home: 2, away: 1 })).toBe(14);
-    expect(maxPossiblePoints({ home: 4, away: 0 })).toBe(15); // com goleada
-    expect(maxPossiblePoints({ home: 1, away: 1 })).toBe(10); // empate
+    expect(maxPossiblePoints({ home: 2, away: 1 })).toBe(8);
+    expect(maxPossiblePoints({ home: 4, away: 0 })).toBe(9); // com goleada
+    expect(maxPossiblePoints({ home: 1, away: 1 })).toBe(8); // empate
   });
 });
