@@ -135,6 +135,18 @@ export function useJoinGroup() {
   });
 }
 
+export function useLeaveGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (groupId: string) => {
+      const fn = httpsCallable<{ groupId: string }, { ok: boolean }>(fns, "leaveGroup");
+      const res = await fn({ groupId });
+      return res.data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["groups"] }),
+  });
+}
+
 export function useCreateGroup() {
   const qc = useQueryClient();
   return useMutation({

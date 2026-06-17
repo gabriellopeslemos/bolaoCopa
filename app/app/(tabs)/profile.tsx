@@ -7,11 +7,10 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { getIdTokenResult } from "firebase/auth";
 import * as Haptics from "expo-haptics";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { signOut } from "@/lib/auth";
 import { useAuth } from "@/hooks/useAuth";
 import { useActiveGroup } from "@/hooks/useActiveGroup";
-import { useCreateGroup, useJoinGroup } from "@/lib/data";
+import { useCreateGroup, useJoinGroup, useLeaveGroup } from "@/lib/data";
 import { Screen, Text, Card, Button, Avatar, Input } from "@/components/ui";
 import { palette, spacing, radius } from "@/lib/theme";
 import type { GroupSummary } from "@/lib/types";
@@ -41,7 +40,7 @@ export default function ProfileScreen() {
     <Screen edges={{ top: true, bottom: true }} style={styles.screen}>
       <View style={styles.hero}>
         <Avatar name={name} size={88} ring />
-        <Text variant="title" center style={{ marginTop: spacing.md }}>{name}</Text>
+        <Text variant="title" center style={{ marginTop: spacing.md, lineHeight: 44 }}>{name}</Text>
         <Text variant="body" color={palette.textMuted}>{user?.email}</Text>
       </View>
 
@@ -116,10 +115,10 @@ function GroupPickerModal({
   onSelect: (id: string) => void;
   onClose: () => void;
 }) {
-  const insets = useSafeAreaInsets();
   const { setActiveGroupId, refetch } = useActiveGroup();
   const create = useCreateGroup();
   const join = useJoinGroup();
+  const leave = useLeaveGroup();
   const { user } = useAuth();
 
   const [form, setForm] = useState<null | "create" | "join">(null);
@@ -156,86 +155,116 @@ function GroupPickerModal({
     }
   }
 
+  function confirmLeave(groupId: string, groupName: string) {
+    Alert.alert(
+      "Sair do bolão",
+      `Tem certeza que deseja sair de "${groupName}"? Seus palpites serão mantidos.`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Sair",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await leave.mutateAsync(groupId);
+            } catch (e: any) {
+              Alert.alert("Erro", e?.message ?? "Não foi possível sair do grupo.");
+            }
+          },
+        },
+      ]
+    );
+  }
+
   const pending = create.isPending || join.isPending;
   const isForm = form !== null;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} />
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + spacing.xl }]}>
-          <View style={styles.handle} />
-
-          {isForm ? (
-            <>
-              <Pressable onPress={() => setForm(null)} hitSlop={8} style={styles.backRow}>
-                <Ionicons name="chevron-back" size={18} color={palette.textMuted} />
-                <Text variant="label" color={palette.textMuted}>Voltar</Text>
-              </Pressable>
-              <Text variant="heading">{form === "create" ? "Criar bolão" : "Entrar em um grupo"}</Text>
-              <Text variant="body" color={palette.textMuted}>
-                {form === "create"
-                  ? "Dê um nome ao seu grupo. Você poderá convidar amigos por um código."
-                  : "Digite o código de convite que você recebeu."}
-              </Text>
-              <Input
-                icon={form === "create" ? "trophy-outline" : "key-outline"}
-                placeholder={form === "create" ? "Ex: Bolão da firma" : "Ex: ABC123"}
-                autoCapitalize={form === "create" ? "sentences" : "characters"}
-                autoFocus
-                value={value}
-                onChangeText={setValue}
-                error={error}
-                maxLength={form === "create" ? 40 : 6}
-                onSubmitEditing={submit}
-              />
-              <Button
-                title={form === "create" ? "Criar e selecionar" : "Entrar"}
-                onPress={submit}
-                loading={pending}
-                disabled={!value.trim()}
-              />
-            </>
-          ) : (
-            <>
-              <Text variant="heading">Seus bolões</Text>
-              <FlatList
-                data={groups}
-                keyExtractor={(g) => g.id}
-                style={{ maxHeight: 320 }}
-                ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
-                ListEmptyComponent={
-                  <Text variant="body" color={palette.textMuted} style={{ paddingVertical: spacing.md }}>
-                    Você ainda não participa de nenhum bolão.
-                  </Text>
-                }
-                renderItem={({ item }) => {
-                  const active = item.id === activeGroupId;
-                  return (
-                    <Pressable onPress={() => onSelect(item.id)}
-                      style={({ pressed }) => [styles.groupRow, active && styles.groupRowActive, pressed && { opacity: 0.7 }]}>
-                      <View style={styles.switcherIcon}>
-                        <Ionicons name="trophy" size={18} color={palette.primary} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text variant="bodyMed" numberOfLines={1}>{item.name}</Text>
-                        <Text variant="caption" color={palette.textMuted}>
-                          {item.memberCount} {item.memberCount === 1 ? "participante" : "participantes"} · {item.totalPoints} pts
-                        </Text>
-                      </View>
-                      {active && <Ionicons name="checkmark-circle" size={22} color={palette.primary} />}
-                    </Pressable>
-                  );
-                }}
-              />
-              <View style={styles.formActions}>
-                <Button title="Entrar com código" variant="secondary" icon="enter-outline"
-                  onPress={() => setForm("join")} style={{ flex: 1 }} />
-                <Button title="Criar bolão" icon="add"
-                  onPress={() => setForm("create")} style={{ flex: 1 }} />
-              </View>
-            </>
-          )}
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+        <View style={styles.overlay}>
+          <Pressable style={styles.overlayBackdrop} onPress={onClose} />
+          <View style={styles.dialog}>
+            {isForm ? (
+              <>
+                <Pressable onPress={() => setForm(null)} hitSlop={8} style={styles.backRow}>
+                  <Ionicons name="chevron-back" size={18} color={palette.textMuted} />
+                  <Text variant="label" color={palette.textMuted}>Voltar</Text>
+                </Pressable>
+                <Text variant="heading">{form === "create" ? "Criar bolão" : "Entrar em um grupo"}</Text>
+                <Text variant="body" color={palette.textMuted}>
+                  {form === "create"
+                    ? "Dê um nome ao seu grupo. Você poderá convidar amigos por um código."
+                    : "Digite o código de convite que você recebeu."}
+                </Text>
+                <Input
+                  icon={form === "create" ? "trophy-outline" : "key-outline"}
+                  placeholder={form === "create" ? "Ex: Bolão da firma" : "Ex: ABC123"}
+                  autoCapitalize={form === "create" ? "sentences" : "characters"}
+                  autoFocus
+                  value={value}
+                  onChangeText={setValue}
+                  error={error}
+                  maxLength={form === "create" ? 40 : 6}
+                  onSubmitEditing={submit}
+                />
+                <Button
+                  title={form === "create" ? "Criar e selecionar" : "Entrar"}
+                  onPress={submit}
+                  loading={pending}
+                  disabled={!value.trim()}
+                />
+              </>
+            ) : (
+              <>
+                <Text variant="heading">Seus bolões</Text>
+                <FlatList
+                  data={groups}
+                  keyExtractor={(g) => g.id}
+                  style={{ maxHeight: 260 }}
+                  ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
+                  ListEmptyComponent={
+                    <Text variant="body" color={palette.textMuted} style={{ paddingVertical: spacing.md }}>
+                      Você ainda não participa de nenhum bolão.
+                    </Text>
+                  }
+                  renderItem={({ item }) => {
+                    const active = item.id === activeGroupId;
+                    return (
+                      <Pressable onPress={() => onSelect(item.id)}
+                        style={({ pressed }) => [styles.groupRow, active && styles.groupRowActive, pressed && { opacity: 0.7 }]}>
+                        <View style={styles.switcherIcon}>
+                          <Ionicons name="trophy" size={18} color={palette.primary} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text variant="bodyMed" numberOfLines={1}>{item.name}</Text>
+                          <Text variant="caption" color={palette.textMuted}>
+                            {item.memberCount} {item.memberCount === 1 ? "participante" : "participantes"} · {item.totalPoints} pts
+                          </Text>
+                        </View>
+                        {active && <Ionicons name="checkmark-circle" size={22} color={palette.primary} />}
+                        {item.role !== "owner" && (
+                          <Pressable
+                            onPress={() => confirmLeave(item.id, item.name)}
+                            hitSlop={8}
+                            style={styles.leaveBtn}
+                          >
+                            <Ionicons name="exit-outline" size={20} color={palette.textFaint} />
+                          </Pressable>
+                        )}
+                      </Pressable>
+                    );
+                  }}
+                />
+                <View style={styles.formActions}>
+                  <Button title="Entrar" variant="secondary" icon="enter-outline"
+                    onPress={() => setForm("join")} style={{ flex: 1 }} />
+                  <Button title="Criar bolão" icon="add"
+                    onPress={() => setForm("create")} style={{ flex: 1 }} />
+                </View>
+              </>
+            )}
+          </View>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -261,8 +290,8 @@ function Divider() {
 }
 
 const styles = StyleSheet.create({
-  screen: { paddingHorizontal: spacing.xl, paddingTop: spacing.xl },
-  hero: { alignItems: "center", marginBottom: spacing.xl },
+  screen: { paddingHorizontal: spacing.xl },
+  hero: { alignItems: "center", paddingTop: spacing.xxl, marginBottom: spacing.xl },
   sectionLabel: { marginBottom: spacing.sm },
   switcher: {
     flexDirection: "row", alignItems: "center", gap: spacing.md,
@@ -276,16 +305,19 @@ const styles = StyleSheet.create({
   menu: { overflow: "hidden" },
   row: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.lg },
   divider: { height: 1, backgroundColor: palette.border, marginLeft: spacing.lg + 22 + spacing.md },
-  backdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.6)" },
-  sheet: {
-    backgroundColor: palette.bgElevated,
-    borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl,
-    padding: spacing.xl, gap: spacing.md,
-    borderTopWidth: 1, borderColor: palette.border,
+  overlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.6)",
+    padding: spacing.xl,
   },
-  handle: {
-    width: 40, height: 4, borderRadius: 2, backgroundColor: palette.border,
-    alignSelf: "center", marginBottom: spacing.sm,
+  overlayBackdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+  dialog: {
+    width: "100%",
+    backgroundColor: palette.bgElevated,
+    borderWidth: 1, borderColor: palette.border,
+    padding: spacing.xl, gap: spacing.md,
   },
   backRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs, marginBottom: -spacing.xs },
   groupRow: {
@@ -295,4 +327,5 @@ const styles = StyleSheet.create({
   },
   groupRowActive: { borderColor: palette.primary, backgroundColor: palette.primaryGlow },
   formActions: { flexDirection: "row", gap: spacing.md, marginTop: spacing.sm },
+  leaveBtn: { padding: spacing.xs },
 });

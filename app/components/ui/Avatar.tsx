@@ -26,7 +26,7 @@ export function Avatar({ name, size = 44, ring }: Props) {
       ]}
     >
       <Text
-        style={{ fontSize: size * 0.36, color: bg, fontWeight: "900" }}
+        style={{ fontSize: size * 0.36, lineHeight: size * 0.44, color: bg, fontWeight: "900" }}
       >
         {initials(name)}
       </Text>

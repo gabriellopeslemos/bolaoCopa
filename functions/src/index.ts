@@ -244,6 +244,32 @@ export const joinGroup = onCall({ invoker: "public" }, async (req) => {
   return { groupId: groupRef.id, name: groupName };
 });
 
+/** Sair de um grupo. */
+export const leaveGroup = onCall({ invoker: "public" }, async (req) => {
+  const uid = req.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Faça login para sair do grupo.");
+
+  const groupId = String(req.data?.groupId ?? "").trim();
+  if (!groupId) throw new HttpsError("invalid-argument", "groupId obrigatório.");
+
+  const db = getFirestore();
+  const groupRef = db.collection("groups").doc(groupId);
+  const groupSnap = await groupRef.get();
+
+  if (!groupSnap.exists) throw new HttpsError("not-found", "Grupo não encontrado.");
+  if (groupSnap.data()!.ownerId === uid) {
+    throw new HttpsError("failed-precondition", "O dono não pode sair do grupo. Delete o grupo para encerrá-lo.");
+  }
+
+  const batch = db.batch();
+  batch.delete(groupRef.collection("members").doc(uid));
+  batch.delete(db.collection("users").doc(uid).collection("memberships").doc(groupId));
+  batch.set(groupRef, { memberCount: FieldValue.increment(-1) }, { merge: true });
+  await batch.commit();
+
+  return { ok: true };
+});
+
 /** Verifica se o usuário é admin (custom claim `admin: true`). */
 async function assertAdmin(uid?: string): Promise<void> {
   if (!uid) throw new HttpsError("unauthenticated", "Login necessário.");
