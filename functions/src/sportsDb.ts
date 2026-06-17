@@ -170,6 +170,18 @@ function richness(ev: SportsDbEvent): number {
   return (hasScore ? 2 : 0) + (status === "finished" ? 1 : 0);
 }
 
+function deduplicateByRichness(events: SportsDbEvent[]): Map<string, SportsDbEvent> {
+  const byId = new Map<string, SportsDbEvent>();
+  for (const ev of events) {
+    if (!ev?.idEvent) continue;
+    const existing = byId.get(ev.idEvent);
+    if (!existing || richness(ev) > richness(existing)) {
+      byId.set(ev.idEvent, ev);
+    }
+  }
+  return byId;
+}
+
 /**
  * Busca os jogos da Copa: calendário da temporada + próximos + recém-encerrados,
  * combinados e deduplicados por idEvent (mantendo a cópia com placar/status mais
@@ -188,15 +200,33 @@ export async function fetchWorldCupEvents(params: {
     getEvents(`${apiKey}/eventspastleague.php?id=${league}`),
   ]);
 
-  const byId = new Map<string, SportsDbEvent>();
-  for (const ev of [...seasonEvents, ...pastEvents, ...nextEvents]) {
-    if (!ev?.idEvent) continue;
-    const existing = byId.get(ev.idEvent);
-    if (!existing || richness(ev) > richness(existing)) {
-      byId.set(ev.idEvent, ev);
-    }
-  }
+  const byId = deduplicateByRichness([...seasonEvents, ...pastEvents, ...nextEvents]);
 
+  return [...byId.values()]
+    .map(normalizeEvent)
+    .filter((f): f is NormalizedFixture => f !== null);
+}
+
+const MAX_ROUNDS = 10;
+
+/**
+ * Busca todos os jogos da Copa rodada por rodada via eventsround.php (rodadas 1–MAX_ROUNDS).
+ * Funciona bem com a chave free "123" e garante cobertura completa quando eventsseason.php
+ * retorna resultados limitados.
+ */
+export async function fetchWorldCupAllRounds(params: {
+  apiKey: string;
+  league: number;
+  season: string;
+}): Promise<NormalizedFixture[]> {
+  const { apiKey, league, season } = params;
+
+  const roundFetches = Array.from({ length: MAX_ROUNDS }, (_, i) =>
+    getEvents(`${apiKey}/eventsround.php?id=${league}&r=${i + 1}&s=${season}`)
+  );
+  const allRoundEvents = (await Promise.all(roundFetches)).flat();
+
+  const byId = deduplicateByRichness(allRoundEvents);
   return [...byId.values()]
     .map(normalizeEvent)
     .filter((f): f is NormalizedFixture => f !== null);

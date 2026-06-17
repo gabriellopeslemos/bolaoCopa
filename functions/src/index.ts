@@ -15,7 +15,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { defineString } from "firebase-functions/params";
 import { logger } from "firebase-functions/v2";
 
-import { fetchWorldCupEvents } from "./sportsDb";
+import { fetchWorldCupEvents, fetchWorldCupAllRounds, type NormalizedFixture } from "./sportsDb";
 import { scoreMatch } from "./scoreMatch";
 import { sendBetReminders } from "./reminders";
 import { progressTournamentAllGroups } from "./tournament";
@@ -79,6 +79,54 @@ export const syncFixtures = onSchedule(
 export const syncFixturesNow = onCall({ invoker: "public" }, async (req) => {
   await assertAdmin(req.auth?.uid);
   return syncFromApi(SPORTSDB_API_KEY.value());
+});
+
+function fixtureRichness(f: NormalizedFixture): number {
+  return (f.score !== null ? 2 : 0) + (f.status === "finished" ? 1 : 0);
+}
+
+/** Busca todas as rodadas (1–10) + endpoints de temporada/próximos/encerrados e faz upsert. */
+async function syncAllRoundsFromApi(apiKey: string): Promise<{ synced: number }> {
+  const [roundFixtures, seasonFixtures] = await Promise.all([
+    fetchWorldCupAllRounds({ apiKey, league: WORLD_CUP_LEAGUE, season: SEASON }),
+    fetchWorldCupEvents({ apiKey, league: WORLD_CUP_LEAGUE, season: SEASON }),
+  ]);
+
+  const byId = new Map<number, NormalizedFixture>();
+  for (const f of [...roundFixtures, ...seasonFixtures]) {
+    const existing = byId.get(f.externalId);
+    if (!existing || fixtureRichness(f) > fixtureRichness(existing)) {
+      byId.set(f.externalId, f);
+    }
+  }
+
+  const db = getFirestore();
+  let synced = 0;
+  for (const f of byId.values()) {
+    const docId = `${COMPETITION_ID}-${f.externalId}`;
+    const data: Partial<MatchDoc> = {
+      competitionId: COMPETITION_ID,
+      externalId: f.externalId,
+      round: f.round,
+      home: { name: f.home.name, flag: f.home.flag },
+      away: { name: f.away.name, flag: f.away.flag },
+      kickoff: Timestamp.fromDate(f.kickoff),
+      status: f.status,
+      score: f.status === "scheduled" ? null : f.score,
+      updatedAt: Timestamp.now(),
+    };
+    await db.collection("matches").doc(docId).set(data, { merge: true });
+    synced++;
+  }
+
+  logger.info(`syncAllRoundsFromApi: ${synced} jogos sincronizados (rodadas 1-10 + temporada)`);
+  return { synced };
+}
+
+/** Importa todas as rodadas sob demanda (apenas admin). */
+export const syncAllRoundsNow = onCall({ invoker: "public" }, async (req) => {
+  await assertAdmin(req.auth?.uid);
+  return syncAllRoundsFromApi(SPORTSDB_API_KEY.value());
 });
 
 /** Lança/ajusta o placar de um jogo manualmente (fallback sem API). */

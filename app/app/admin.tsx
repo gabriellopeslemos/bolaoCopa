@@ -9,6 +9,7 @@ import { palette, spacing } from "@/lib/theme";
 export default function AdminScreen() {
   const insets = useSafeAreaInsets();
   const [syncing, setSyncing] = useState(false);
+  const [syncingAll, setSyncingAll] = useState(false);
   const [matchId, setMatchId] = useState("");
   const [home, setHome] = useState("");
   const [away, setAway] = useState("");
@@ -26,6 +27,20 @@ export default function AdminScreen() {
       Alert.alert("Erro", humanError(e));
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function syncAllRounds() {
+    setSyncingAll(true);
+    try {
+      await auth.currentUser?.getIdToken(true);
+      const fn = httpsCallable<void, { synced: number }>(fns, "syncAllRoundsNow");
+      const res = await fn();
+      Alert.alert("Jogos importados ✓", `${res.data.synced} jogos atualizados (todas as rodadas).`);
+    } catch (e) {
+      Alert.alert("Erro", humanError(e));
+    } finally {
+      setSyncingAll(false);
     }
   }
 
@@ -58,6 +73,20 @@ export default function AdminScreen() {
             Busca jogos e placares da Copa no TheSportsDB e atualiza o banco.
           </Text>
           <Button title="Sincronizar agora" icon="sync" onPress={sync} loading={syncing} />
+        </Card>
+
+        <Card style={styles.card}>
+          <Text variant="heading">Buscar todos os jogos</Text>
+          <Text variant="body" color={palette.textMuted}>
+            Importa todas as rodadas (1–10) via TheSportsDB. Use quando jogos estiverem
+            faltando no app. A operação pode levar alguns segundos.
+          </Text>
+          <Button
+            title="Buscar todos os jogos"
+            icon="cloud-download-outline"
+            onPress={syncAllRounds}
+            loading={syncingAll}
+          />
         </Card>
 
         <Card style={styles.card}>
