@@ -75,7 +75,7 @@ export default function BetScreen() {
         <Card style={styles.pickCard}>
           <View style={styles.steppers}>
             <ScoreStepper team={m.home} value={score.home} onChange={(n) => setScore((s) => ({ ...s, home: n }))} />
-            <Text variant="title" color={palette.textFaint} style={{ marginTop: 52 }}>×</Text>
+            <Text variant="title" color={palette.textFaint} style={styles.vsLabel}>×</Text>
             <ScoreStepper team={m.away} value={score.away} onChange={(n) => setScore((s) => ({ ...s, away: n }))} align="right" />
           </View>
 
@@ -110,13 +110,14 @@ const styles = StyleSheet.create({
   center: { alignItems: "center", justifyContent: "center", padding: spacing.xl },
   container: { padding: spacing.xl, gap: spacing.md },
   pickCard: { gap: spacing.lg, alignItems: "center" },
-  steppers: { flexDirection: "row", alignItems: "flex-start", justifyContent: "center", gap: spacing.md, width: "100%" },
+  steppers: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.md, width: "100%" },
+  vsLabel: { marginTop: 40 },
   potential: {
     alignItems: "center", backgroundColor: palette.primaryGlow,
     paddingVertical: spacing.md, paddingHorizontal: spacing.xxl, borderRadius: radius.lg,
     width: "100%",
   },
-  potentialValue: { fontFamily: "Inter_800ExtraBold", fontSize: 30, color: palette.primary },
+  potentialValue: { fontFamily: "Inter_800ExtraBold", fontSize: 30, lineHeight: 38, color: palette.primary },
   footer: {
     position: "absolute", left: 0, right: 0, bottom: 0,
     paddingHorizontal: spacing.xl, paddingTop: spacing.md,
