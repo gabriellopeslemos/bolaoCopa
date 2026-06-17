@@ -73,7 +73,9 @@ export function MatchCard({ match, bet, onPress }: Props) {
       <View style={styles.teamsRow}>
         <View style={styles.teamCol}>
           <TeamCrest team={match.home} size={44} />
-          <Text style={styles.teamName} numberOfLines={1}>{match.home.name}</Text>
+          <Text style={styles.teamName} numberOfLines={1}>
+            {match.home.name.toUpperCase()}
+          </Text>
         </View>
 
         <View style={styles.centerBox}>
@@ -101,7 +103,9 @@ export function MatchCard({ match, bet, onPress }: Props) {
 
         <View style={styles.teamCol}>
           <TeamCrest team={match.away} size={44} />
-          <Text style={styles.teamName} numberOfLines={1}>{match.away.name}</Text>
+          <Text style={styles.teamName} numberOfLines={1}>
+            {match.away.name.toUpperCase()}
+          </Text>
         </View>
       </View>
 

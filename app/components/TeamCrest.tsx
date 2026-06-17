@@ -9,7 +9,7 @@ export function TeamCrest({ team, size = 40 }: { team: TeamInfo; size?: number }
     return (
       <Image
         source={{ uri: team.flag }}
-        style={{ width: size, height: size, borderRadius: 0, backgroundColor: palette.surfaceAlt }}
+        style={{ width: size, height: size, borderRadius: 0 }}
       />
     );
   }

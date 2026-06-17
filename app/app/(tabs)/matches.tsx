@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import {
-  FlatList,
+  SectionList,
   ScrollView,
   View,
   StyleSheet,
@@ -17,6 +17,8 @@ import { EmptyState, SkeletonCard, FadeIn, Button } from "@/components/ui";
 import { MatchCard } from "@/components/MatchCard";
 import { isBettingOpen } from "@/lib/format";
 import { palette, spacing, font } from "@/lib/theme";
+import type { Match } from "@/lib/types";
+
 const WEEKDAY_SHORT = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const MONTH_NAMES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 
@@ -33,11 +35,6 @@ function parseDateKey(key: string): { day: number; weekday: string; month: strin
   return { day: d, weekday: WEEKDAY_SHORT[date.getDay()], month: MONTH_NAMES[m - 1], year: y };
 }
 
-function formatHeaderSubtitle(key: string): string {
-  const { day, weekday, month, year } = parseDateKey(key);
-  return `${weekday}, ${day} ${month} ${year} · Copa do Mundo`;
-}
-
 function getItemOpacity(index: number, selectedIndex: number): number {
   const dist = Math.abs(index - selectedIndex);
   if (dist === 0) return 1;
@@ -46,76 +43,152 @@ function getItemOpacity(index: number, selectedIndex: number): number {
   return 0.35;
 }
 
+type Section = { key: string; data: Match[] };
+
 export default function MatchesScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
-  const { activeGroupId, activeGroup } = useActiveGroup();
+  const { activeGroupId } = useActiveGroup();
 
   const [statusFilter, setStatusFilter] = useState<"upcoming" | "finished">("upcoming");
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
 
   const dateScrollRef = useRef<ScrollView>(null);
+  const sectionListRef = useRef<SectionList<Match>>(null);
+
+  // Stable ref so onViewableItemsChanged never changes after mount
+  const viewableHandlerRef = useRef<((info: any) => void) | null>(null);
+  // Suppress viewable-items updates while a programmatic scroll is in flight
+  const isProgrammaticScroll = useRef(false);
 
   const { data: matches, isLoading, refetch, isRefetching } = useMatches();
   const myBets = useMyBets(activeGroupId, user?.uid);
 
-  // All filtered matches for the selected tab
-  const filtered = matches?.filter((m) => {
-    if (!m.kickoff) return false;
-    if (statusFilter === "finished") return m.status === "finished";
-    return m.status === "scheduled" || m.status === "live";
-  }) ?? [];
+  // All unique dates across ALL matches (strip always shows these)
+  const allDateKeys = useMemo(() => {
+    if (!matches) return [];
+    return Array.from(
+      new Set(matches.filter((m) => m.kickoff).map((m) => toDateKey(m.kickoff.toDate())))
+    ).sort((a, b) => a.localeCompare(b));
+  }, [matches]);
 
-  // Unique sorted date keys
-  const dateKeys = Array.from(new Set(filtered.map((m) => toDateKey(m.kickoff.toDate())))).sort(
-    (a, b) => (statusFilter === "finished" ? b.localeCompare(a) : a.localeCompare(b))
-  );
+  // Sections grouped by date for the current status tab
+  const sections = useMemo<Section[]>(() => {
+    if (!matches) return [];
+    const filtered = matches
+      .filter((m) => {
+        if (!m.kickoff) return false;
+        if (statusFilter === "finished") return m.status === "finished";
+        return m.status === "scheduled" || m.status === "live";
+      })
+      .sort((a, b) =>
+        statusFilter === "finished"
+          ? b.kickoff.toMillis() - a.kickoff.toMillis()
+          : a.kickoff.toMillis() - b.kickoff.toMillis()
+      );
 
-  // Keep selected date valid when filter changes
-  useEffect(() => {
-    if (dateKeys.length === 0) {
-      setSelectedDateKey(null);
-      return;
+    const map = new Map<string, Match[]>();
+    for (const m of filtered) {
+      const key = toDateKey(m.kickoff.toDate());
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(m);
     }
-    setSelectedDateKey((prev) => (prev && dateKeys.includes(prev) ? prev : dateKeys[0]));
-  }, [statusFilter, dateKeys.join(",")]);
+    return Array.from(map.entries()).map(([key, data]) => ({ key, data }));
+  }, [matches, statusFilter]);
 
-  // Scroll selected date chip into view
+  // Which dates have matches in the current tab (for dot indicator)
+  const activeDateKeys = useMemo(() => new Set(sections.map((s) => s.key)), [sections]);
+
+  // Initialize selectedDateKey on first load
+  useEffect(() => {
+    if (selectedDateKey === null && allDateKeys.length > 0) {
+      const today = toDateKey(new Date());
+      setSelectedDateKey(allDateKeys.includes(today) ? today : allDateKeys[0]);
+    }
+  }, [allDateKeys]);
+
+  // When tab changes, jump to first section of the new tab
+  useEffect(() => {
+    const firstKey = sections[0]?.key ?? allDateKeys[0] ?? null;
+    setSelectedDateKey(firstKey);
+  }, [statusFilter]);
+
+  // Keep selected date chip scrolled into view
   useEffect(() => {
     if (!selectedDateKey) return;
-    const idx = dateKeys.indexOf(selectedDateKey);
+    const idx = allDateKeys.indexOf(selectedDateKey);
     if (idx < 0) return;
-    // Each item is roughly 44px wide + 18px gap
     const offset = 20 + idx * 62 - 100;
-    setTimeout(() => dateScrollRef.current?.scrollTo({ x: Math.max(0, offset), animated: true }), 50);
-  }, [selectedDateKey]);
+    setTimeout(
+      () => dateScrollRef.current?.scrollTo({ x: Math.max(0, offset), animated: true }),
+      50
+    );
+  }, [selectedDateKey, allDateKeys]);
 
-  // Matches for the selected date only
-  const visibleMatches = selectedDateKey
-    ? filtered
-        .filter((m) => toDateKey(m.kickoff.toDate()) === selectedDateKey)
-        .sort((a, b) =>
-          statusFilter === "finished"
-            ? b.kickoff.toMillis() - a.kickoff.toMillis()
-            : a.kickoff.toMillis() - b.kickoff.toMillis()
-        )
-    : [];
+  const scrollDateStripTo = useCallback(
+    (dateKey: string) => {
+      const idx = allDateKeys.indexOf(dateKey);
+      if (idx < 0) return;
+      const offset = 20 + idx * 62 - 100;
+      dateScrollRef.current?.scrollTo({ x: Math.max(0, offset), animated: true });
+    },
+    [allDateKeys]
+  );
 
-  const selectedIndex = dateKeys.indexOf(selectedDateKey ?? "");
+  // Update viewable handler ref on every render so it always sees fresh state/closures
+  viewableHandlerRef.current = ({ viewableItems }: any) => {
+    if (isProgrammaticScroll.current) return;
+    if (!viewableItems.length) return;
+    const first = viewableItems.find((vi: any) => vi.isViewable && vi.section);
+    if (first?.section?.key && first.section.key !== selectedDateKey) {
+      setSelectedDateKey(first.section.key);
+      scrollDateStripTo(first.section.key);
+    }
+  };
+
+  // Stable callback that delegates to the ref — never changes after mount
+  const onViewableItemsChanged = useCallback((info: any) => {
+    viewableHandlerRef.current?.(info);
+  }, []);
+
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 15 });
+
+  const handleDatePress = useCallback(
+    (dateKey: string) => {
+      setSelectedDateKey(dateKey);
+      const sectionIdx = sections.findIndex((s) => s.key === dateKey);
+      if (sectionIdx >= 0 && sectionListRef.current) {
+        isProgrammaticScroll.current = true;
+        // Clear the flag after the scroll animation settles (~500ms)
+        setTimeout(() => { isProgrammaticScroll.current = false; }, 600);
+        try {
+          sectionListRef.current.scrollToLocation({
+            sectionIndex: sectionIdx,
+            itemIndex: 0,
+            animated: true,
+            viewOffset: 0,
+          });
+        } catch (_) {
+          isProgrammaticScroll.current = false;
+        }
+      }
+    },
+    [sections]
+  );
+
+  const selectedIndex = allDateKeys.indexOf(selectedDateKey ?? "");
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
       {/* ── Header ── */}
       <View style={styles.header}>
         <RNText style={styles.pageTitle}>Jogos</RNText>
-        <RNText style={styles.pageSubtitle}>
-          {selectedDateKey ? formatHeaderSubtitle(selectedDateKey) : "Copa do Mundo 2026"}
-        </RNText>
+        <RNText style={styles.pageSubtitle}>Copa do Mundo 2026</RNText>
       </View>
 
-      {/* ── Date strip ── */}
-      {!isLoading && dateKeys.length > 0 && (
+      {/* ── Date strip — always shows ALL match dates ── */}
+      {!isLoading && allDateKeys.length > 0 && (
         <View style={styles.dateStripWrapper}>
           <ScrollView
             ref={dateScrollRef}
@@ -123,14 +196,17 @@ export default function MatchesScreen() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.dateStripContent}
           >
-            {dateKeys.map((key, idx) => {
+            {allDateKeys.map((key, idx) => {
               const { day, weekday } = parseDateKey(key);
               const isSelected = key === selectedDateKey;
-              const opacity = getItemOpacity(idx, selectedIndex);
+              const hasMatches = activeDateKeys.has(key);
+              const opacity = hasMatches
+                ? getItemOpacity(idx, selectedIndex)
+                : 0.2;
               return (
                 <TouchableOpacity
                   key={key}
-                  onPress={() => setSelectedDateKey(key)}
+                  onPress={() => handleDatePress(key)}
                   activeOpacity={0.7}
                   style={[styles.dateItem, isSelected && styles.dateItemSelected, { opacity }]}
                 >
@@ -140,6 +216,9 @@ export default function MatchesScreen() {
                   <RNText style={[styles.dateNumber, isSelected && styles.dateNumberSelected]}>
                     {day}
                   </RNText>
+                  {hasMatches && (
+                    <View style={[styles.dateDot, isSelected && styles.dateDotSelected]} />
+                  )}
                 </TouchableOpacity>
               );
             })}
@@ -177,11 +256,16 @@ export default function MatchesScreen() {
           {[0, 1, 2, 3].map((i) => <SkeletonCard key={i} />)}
         </View>
       ) : (
-        <FlatList
-          data={visibleMatches}
-          keyExtractor={(m) => m.id}
+        <SectionList
+          ref={sectionListRef}
+          sections={sections}
+          keyExtractor={(item) => item.id}
           contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + spacing.xxxl }]}
           showsVerticalScrollIndicator={false}
+          stickySectionHeadersEnabled={false}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig.current}
+          onScrollToIndexFailed={() => {}}
           refreshControl={
             <RefreshControl
               refreshing={isRefetching}
@@ -215,6 +299,17 @@ export default function MatchesScreen() {
               }
             />
           }
+          renderSectionHeader={({ section }) => {
+            const { day, weekday, month, year } = parseDateKey(section.key);
+            return (
+              <View style={styles.sectionHeader}>
+                <RNText style={styles.sectionHeaderText}>
+                  {weekday}, {day} {month} {year} · Copa do Mundo
+                </RNText>
+              </View>
+            );
+          }}
+          SectionSeparatorComponent={() => <View style={{ height: 8 }} />}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           renderItem={({ item, index }) => {
             const bet = myBets.data?.[item.id];
@@ -288,12 +383,12 @@ const styles = StyleSheet.create({
   dateItem: {
     alignItems: "center",
     gap: 3,
-    paddingBottom: 8,
+    paddingBottom: 10,
   },
   dateItemSelected: {
     borderBottomWidth: 2,
     borderBottomColor: palette.primary,
-    paddingBottom: 4,
+    paddingBottom: 6,
   },
   dateWeekday: {
     fontFamily: font.bold,
@@ -316,6 +411,16 @@ const styles = StyleSheet.create({
     fontSize: 28,
     lineHeight: 28,
     color: palette.primary,
+  },
+  dateDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: palette.textMuted,
+    marginTop: 1,
+  },
+  dateDotSelected: {
+    backgroundColor: palette.primary,
   },
 
   // ── Toggle ──
@@ -352,6 +457,20 @@ const styles = StyleSheet.create({
   },
   toggleTextActive: {
     color: palette.textOnPrimary,
+  },
+
+  // ── Section header ──
+  sectionHeader: {
+    paddingTop: 14,
+    paddingBottom: 8,
+  },
+  sectionHeaderText: {
+    fontFamily: font.bold,
+    fontSize: 11,
+    fontWeight: undefined,
+    letterSpacing: 2.5,
+    color: palette.textFaint,
+    textTransform: "uppercase",
   },
 
   // ── List ──
