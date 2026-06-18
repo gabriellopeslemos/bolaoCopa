@@ -4,7 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Text } from "./ui/Text";
 import { TeamCrest } from "./TeamCrest";
 import { palette, radius, spacing, font } from "@/lib/theme";
-import { formatBrasiliaTime, formatCountdown, isBettingOpen } from "@/lib/format";
+import { formatBrasiliaTime, formatCountdown, formatRound, isBettingOpen } from "@/lib/format";
 import type { Match, Bet } from "@/lib/types";
 
 interface Props {
@@ -55,7 +55,7 @@ export function MatchCard({ match, bet, onPress }: Props) {
       {/* Header: round/group · status or live badge */}
       <View style={styles.topRow}>
         <Text style={styles.roundText} numberOfLines={1}>
-          {match.round || "Partida"}
+          {formatRound(match.round)}
         </Text>
         {live ? (
           <View style={styles.liveBadge}>

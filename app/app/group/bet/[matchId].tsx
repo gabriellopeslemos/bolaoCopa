@@ -9,7 +9,7 @@ import { Screen, Text, Card, Button } from "@/components/ui";
 import { ScoreStepper } from "@/components/ScoreStepper";
 import { ScoringRulesCard } from "@/components/ScoringRulesCard";
 import { palette, spacing, radius } from "@/lib/theme";
-import { formatKickoff, isBettingOpen } from "@/lib/format";
+import { formatKickoff, formatRound, isBettingOpen } from "@/lib/format";
 import { maxPossiblePoints, type Score } from "@bolao/scoring";
 
 export default function BetScreen() {
@@ -69,7 +69,7 @@ export default function BetScreen() {
         contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 100 }]}
         showsVerticalScrollIndicator={false}
       >
-        <Text variant="caption" color={palette.textMuted} center>{m.round || "Partida"}</Text>
+        <Text variant="caption" color={palette.textMuted} center>{formatRound(m.round)}</Text>
         <Text variant="caption" color={palette.textFaint} center>{formatKickoff(m.kickoff)}</Text>
 
         <Card style={styles.pickCard}>

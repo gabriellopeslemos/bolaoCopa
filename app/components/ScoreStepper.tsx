@@ -32,11 +32,11 @@ export function ScoreStepper({ team, value, onChange, disabled, align = "left" }
       </View>
 
       <View style={styles.stepper}>
-        <StepBtn icon="remove" onPress={() => bump(-1)} disabled={disabled || value <= 0} />
+        <StepBtn icon="add" onPress={() => bump(1)} disabled={disabled || value >= 20} />
         <View style={styles.valueBox}>
           <Text style={styles.value}>{value}</Text>
         </View>
-        <StepBtn icon="add" onPress={() => bump(1)} disabled={disabled || value >= 20} primary />
+        <StepBtn icon="remove" onPress={() => bump(-1)} disabled={disabled || value <= 0} />
       </View>
     </View>
   );
@@ -78,7 +78,7 @@ const styles = StyleSheet.create({
   btn: {
     width: 44, height: 44, borderRadius: radius.xs,  // 0px — sharp corners
     backgroundColor: palette.surface, borderWidth: 1, borderColor: palette.border,
-    alignItems: "center", justifyContent: "center",
+    alignItems: "center", justifyContent: "center", color: palette.primary
   },
   btnPrimary: { backgroundColor: palette.primary, borderColor: palette.primary },
   btnPressed: { opacity: 0.7, transform: [{ scale: 0.94 }] },

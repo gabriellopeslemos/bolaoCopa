@@ -59,6 +59,12 @@ export function formatShortDate(ts?: Timestamp | null): string {
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} ${hh}:${mm}`;
 }
 
+/** Formata o round do jogo: números viram "Rodada X"; textos (ex: "Group Stage") ficam como vieram. */
+export function formatRound(round?: string): string {
+  if (!round) return "Partida";
+  return /^\d+$/.test(round) ? `Rodada ${round}` : round;
+}
+
 export const STATUS_META: Record<string, { label: string; color: string }> = {
   scheduled: { label: "Aberto", color: "#7FA593" },
   live: { label: "AO VIVO", color: "#EF4444" },
