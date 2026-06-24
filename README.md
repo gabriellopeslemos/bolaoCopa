@@ -33,7 +33,7 @@ A World Cup prediction / pick'em app for Android and iOS, built with **Expo (Rea
 | Bonus: Rout (≥ 4 goal difference) | +1 |
 
 Bonuses are cumulative and only apply if you got the winner/draw correct.
-Exact score = all bonuses active = maximum of 14 pts (or 15 with a rout).
+Exact score = all bonuses active = maximum of 8 pts (or 9 with a rout).
 
 Groups can override the scoring config via `groups/{groupId}.scoringConfig` (partial override).
 
@@ -70,15 +70,14 @@ matches/{matchId}                     match data (teams, kickoff, status, score)
 Key security invariants enforced by `firestore.rules`:
 - Predictions lock **5 minutes before kickoff** — no late picks
 - Other members' picks are hidden until predictions lock for that match
-- `points` and `totalPoints` are never writable by clients — only Cloud Functions (Admin SDK) can update them
 
 ## Prerequisites
 
 - Node.js 18+
 - A [Firebase](https://firebase.google.com) account (free)
-- (Optional) Premium [TheSportsDB](https://www.thesportsdb.com/api.php) API key — the free public key `123` works to get started
+- (Optional) TheSportsDB API (https://www.thesportsdb.com/api.php) — the free public key `123` works to get started
 - [Firebase CLI](https://firebase.google.com/docs/cli): `npm install -g firebase-tools`
-- [Expo Go](https://expo.dev/go) on your phone for testing without a native build
+- [Expo Go](https://expo.dev/go) on your phone for testing
 
 ## Setup
 
@@ -104,7 +103,7 @@ firebase login
 firebase use --add   # select your project
 ```
 
-> Match sync uses **TheSportsDB** with the free public key `123` by default — no extra configuration needed. For the full fixture calendar without rate limits, set the `SPORTSDB_API_KEY` param to a premium key (in `functions/.env` or via `firebase functions:config`).
+> Match sync uses **TheSportsDB** with the free public key `123` by default — no extra configuration needed. If needed, set the `SPORTSDB_API_KEY` param to a premium key (in `functions/.env` or via `firebase functions:config`).
 
 ### 4. Run tests
 
@@ -124,11 +123,11 @@ Start the emulators in another terminal. You need **auth + firestore + functions
 firebase emulators:start --only auth,firestore,functions
 ```
 
-Then seed the matches. Use `127.0.0.1` (not `localhost`) and the **same project id as the app** (`bolaocopa-22280`), otherwise the data lands in a different namespace and the app won't see it:
+Then seed the matches. Use `127.0.0.1` (not `localhost`) and the **same project id as the app**, otherwise the data lands in a different namespace and the app won't see it:
 
 ```powershell
 # PowerShell:
-$env:FIRESTORE_EMULATOR_HOST="127.0.0.1:8080"; $env:GOOGLE_CLOUD_PROJECT="bolaocopa-22280"; node scripts/seed.mjs
+$env:FIRESTORE_EMULATOR_HOST="127.0.0.1:8080"; $env:GOOGLE_CLOUD_PROJECT="your-project-id"; node scripts/seed.mjs
 ```
 
 Check the data in the Emulator UI: http://127.0.0.1:4000/firestore
@@ -206,27 +205,3 @@ cd app
 npx eas build --platform android --profile preview
 # Download the generated .apk and share it with friends
 ```
-
-### iOS
-
-```bash
-# Requires macOS + Apple Developer account (US$ 99/year) to install outside Expo Go
-npx eas build --platform ios --profile preview
-```
-
-### Publishing to stores (optional)
-
-- **Google Play:** one-time fee of US$ 25
-- **Apple App Store:** US$ 99/year
-
-## Costs for Friend Groups
-
-| Item | Expected Cost |
-|---|---|
-| Firebase (Auth / Firestore / Functions / Push) | **$0** (within free tier) |
-| TheSportsDB (free public key `123`) | **$0** |
-| Expo Go / direct APK | **$0** |
-| Google Play (if publishing) | US$ 25 (one-time) |
-| Apple App Store (if publishing) | US$ 99/year |
-
-> Tip: set a **US$ 1 budget alert** in Google Cloud to be notified if usage exceeds the Firebase free tier.
