@@ -27,9 +27,9 @@ A World Cup prediction / pick'em app for Android and iOS, built with **Expo (Rea
 |---|---|
 | Base: correct winner / draw | 3 |
 | Bonus: Exact Score | +5 |
-| Bonus: Winner's Score | +3 |
-| Bonus: Goal Difference | +2 |
-| Bonus: Loser's Score | +1 |
+| Bonus: Exact Winner's Score | +3 |
+| Bonus: Exact Goal Difference | +2 |
+| Bonus: Exact Loser's Score | +1 |
 | Bonus: Rout (≥ 4 goal difference) | +1 |
 
 Bonuses are cumulative and only apply if you got the winner/draw correct.
